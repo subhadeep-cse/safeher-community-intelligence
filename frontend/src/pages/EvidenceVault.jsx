@@ -10,7 +10,8 @@ import {
   deleteEvidence, 
   getExportUrl, 
   getUploadUrl,
-  reverseGeocode
+  reverseGeocode,
+  fetchVaultStats
 } from '../services/api';
 import { 
   Archive, Plus, Search, FolderOpen, FolderClosed, Trash2, MapPin, 
@@ -48,6 +49,7 @@ export default function EvidenceVault() {
   const [cases, setCases] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activeCase, setActiveCase] = useState(null);
+  const [mediaStats, setMediaStats] = useState({ images: 0, videos: 0, audio: 0, docs: 0, storage: '0.0 MB' });
   const navigate = useNavigate();
   
   // Dashboard Filters
@@ -68,12 +70,25 @@ export default function EvidenceVault() {
   const loadCases = async () => {
     try {
       setLoading(true);
-      const data = await fetchVaultCases();
+      const [data, statsData] = await Promise.all([
+        fetchVaultCases(),
+        fetchVaultStats()
+      ]);
       setCases(data);
+      setMediaStats(statsData);
     } catch (error) {
-      toast.error('Failed to load cases');
+      toast.error('Failed to load cases or stats');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadStatsOnly = async () => {
+    try {
+      const statsData = await fetchVaultStats();
+      setMediaStats(statsData);
+    } catch (error) {
+      console.error('Failed to load stats', error);
     }
   };
 
@@ -149,6 +164,7 @@ export default function EvidenceVault() {
       await deleteVaultCase(id);
       setCases(cases.filter(c => c.id !== id));
       setActiveCase(null);
+      loadStatsOnly();
       toast.success('Case deleted');
     } catch (error) {
       toast.error('Failed to delete case');
@@ -164,6 +180,7 @@ export default function EvidenceVault() {
       const updatedCase = await getVaultCase(activeCase.id);
       setActiveCase(updatedCase);
       setCases(cases.map(c => c.id === activeCase.id ? { ...c, evidence_count: c.evidence_count + files.length } : c));
+      loadStatsOnly();
       toast.success(result.message, { id: loadingToast });
     } catch (error) {
       toast.error('Upload failed', { id: loadingToast });
@@ -188,28 +205,14 @@ export default function EvidenceVault() {
       const updatedCase = await getVaultCase(activeCase.id);
       setActiveCase(updatedCase);
       setCases(cases.map(c => c.id === activeCase.id ? { ...c, evidence_count: Math.max(0, c.evidence_count - 1) } : c));
+      loadStatsOnly();
       toast.success('Evidence deleted');
     } catch (error) {
       toast.error('Failed to delete evidence');
     }
   };
 
-  const getMediaStats = () => {
-    // We can't fetch all evidence instantly across all cases without a new API, 
-    // so we'll mock the global media breakdown based on averages for the dashboard,
-    // or calculate it if the backend provided it.
-    // For strict compliance, we will render the counters.
-    const totalFiles = cases.reduce((acc, c) => acc + (c.evidence_count || 0), 0);
-    return {
-      images: Math.floor(totalFiles * 0.4),
-      videos: Math.floor(totalFiles * 0.3),
-      audio: Math.floor(totalFiles * 0.1),
-      docs: Math.floor(totalFiles * 0.2),
-      storage: (totalFiles * 2.4).toFixed(1) + ' MB'
-    };
-  };
-
-  // DASHBOARD VIEW
+  // Dashboard View
   if (!activeCase) {
     const filteredCases = cases.filter(c => {
       const searchStr = searchQuery.toLowerCase();
@@ -226,7 +229,7 @@ export default function EvidenceVault() {
     const openCount = cases.filter(c => c.status === 'Active').length;
     const closedCount = cases.filter(c => c.status === 'Closed').length;
     const archivedCount = cases.filter(c => c.status === 'Archived').length;
-    const stats = getMediaStats();
+    const stats = mediaStats;
 
     return (
       <div className="animate-fade-in" style={{ paddingBottom: '40px' }}>

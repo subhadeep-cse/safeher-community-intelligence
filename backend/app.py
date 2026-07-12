@@ -199,6 +199,43 @@ def get_vault_cases():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+@app.route('/vault/stats', methods=['GET'])
+def get_vault_stats():
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute("SELECT file_type, file_path FROM vault_evidence")
+        evidence = cursor.fetchall()
+        conn.close()
+        
+        stats = {
+            'images': 0,
+            'videos': 0,
+            'audio': 0,
+            'docs': 0,
+            'storage_bytes': 0
+        }
+        
+        for ev in evidence:
+            t = ev['file_type']
+            if t == 'image': stats['images'] += 1
+            elif t == 'video': stats['videos'] += 1
+            elif t == 'audio': stats['audio'] += 1
+            elif t in ('document', 'pdf'): stats['docs'] += 1
+            
+            path = ev['file_path']
+            if os.path.exists(path):
+                stats['storage_bytes'] += os.path.getsize(path)
+                
+        # Format storage
+        mb = stats['storage_bytes'] / (1024 * 1024)
+        stats['storage'] = f"{mb:.1f} MB"
+        
+        return jsonify(stats), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 @app.route('/vault/cases', methods=['POST'])
 def create_vault_case():
     data = request.json

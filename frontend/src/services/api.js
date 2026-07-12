@@ -105,6 +105,11 @@ export const fetchVaultCases = async () => {
   return response.data;
 };
 
+export const fetchVaultStats = async () => {
+  const response = await axios.get(`${API_URL}/vault/stats`);
+  return response.data;
+};
+
 export const createVaultCase = async (caseData) => {
   const response = await axios.post(`${API_URL}/vault/cases`, caseData);
   return response.data;
