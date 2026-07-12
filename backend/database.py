@@ -95,6 +95,18 @@ def init_db():
     if 'linked_report_id' not in vault_columns:
         cursor.execute("ALTER TABLE vault_cases ADD COLUMN linked_report_id INTEGER")
 
+    # Migration for vault_evidence
+    cursor.execute("PRAGMA table_info(vault_evidence)")
+    evidence_columns = [info['name'] for info in cursor.fetchall()]
+    if 'file_size' not in evidence_columns:
+        cursor.execute("ALTER TABLE vault_evidence ADD COLUMN file_size INTEGER")
+    if 'latitude' not in evidence_columns:
+        cursor.execute("ALTER TABLE vault_evidence ADD COLUMN latitude REAL")
+    if 'longitude' not in evidence_columns:
+        cursor.execute("ALTER TABLE vault_evidence ADD COLUMN longitude REAL")
+    if 'address' not in evidence_columns:
+        cursor.execute("ALTER TABLE vault_evidence ADD COLUMN address TEXT")
+
     conn.commit()
     conn.close()
 

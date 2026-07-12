@@ -379,6 +379,11 @@ def upload_evidence(id):
         return jsonify({"error": "No file part"}), 400
         
     files = request.files.getlist('file')
+    file_sizes = request.form.getlist('fileSizes')
+    latitude = request.form.get('latitude') or None
+    longitude = request.form.get('longitude') or None
+    address = request.form.get('address') or None
+
     if not files or files[0].filename == '':
         return jsonify({"error": "No selected file"}), 400
 
@@ -388,7 +393,7 @@ def upload_evidence(id):
     uploaded_evidence = []
     
     try:
-        for file in files:
+        for i, file in enumerate(files):
             filename = secure_filename(file.filename)
             # Create a unique filename to avoid overwriting
             unique_filename = f"{datetime.now().strftime('%Y%m%d%H%M%S')}_{filename}"
@@ -404,17 +409,19 @@ def upload_evidence(id):
             elif mime.startswith('audio/'): file_type = 'audio'
             elif mime == 'application/pdf': file_type = 'pdf'
             
+            size = file_sizes[i] if i < len(file_sizes) else 0
+            
             cursor.execute('''
-                INSERT INTO vault_evidence (case_id, file_name, file_type, file_path)
-                VALUES (?, ?, ?, ?)
-            ''', (id, filename, file_type, file_path))
+                INSERT INTO vault_evidence (case_id, file_name, file_type, file_path, file_size, latitude, longitude, address)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (id, filename, file_type, file_path, size, latitude, longitude, address))
             
             ev_id = cursor.lastrowid
             
             cursor.execute('''
                 INSERT INTO vault_timeline (case_id, event_description)
                 VALUES (?, ?)
-            ''', (id, f"Uploaded {file_type}: {filename}"))
+            ''', (id, f"{file_type.title()} uploaded"))
             
             cursor.execute("SELECT * FROM vault_evidence WHERE id = ?", (ev_id,))
             uploaded_evidence.append(row_to_dict(cursor.fetchone()))

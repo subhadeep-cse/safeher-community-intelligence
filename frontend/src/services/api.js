@@ -131,11 +131,16 @@ export const deleteVaultCase = async (id) => {
   return response.data;
 };
 
-export const uploadEvidence = async (id, files) => {
+export const uploadEvidence = async (id, files, metadata = {}) => {
   const formData = new FormData();
   for (let i = 0; i < files.length; i++) {
     formData.append('file', files[i]);
+    formData.append('fileSizes', files[i].size);
   }
+  if (metadata.latitude) formData.append('latitude', metadata.latitude);
+  if (metadata.longitude) formData.append('longitude', metadata.longitude);
+  if (metadata.address) formData.append('address', metadata.address);
+  
   const response = await axios.post(`${API_URL}/vault/cases/${id}/evidence`, formData, {
     headers: { 'Content-Type': 'multipart/form-data' }
   });

@@ -24,6 +24,17 @@ import ReportModal from '../components/ReportModal';
 import MapComponent from '../components/MapComponent';
 import { useNavigate } from 'react-router-dom';
 
+const calculateDistance = (lat1, lon1, lat2, lon2) => {
+  const R = 6371; // km
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+            Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+            Math.sin(dLon/2) * Math.sin(dLon/2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  return R * c;
+};
+
 // Components
 const StatCard = ({ title, value, icon, color }) => (
   <div className="glass-panel animate-fade-in" style={{ padding: '20px', display: 'flex', alignItems: 'center', gap: '15px' }}>
@@ -112,6 +123,7 @@ export default function EvidenceVault() {
       const newCase = await createVaultCase(payload);
       setCases([newCase, ...cases]);
       setIsCreateModalOpen(false);
+      loadStatsOnly();
       toast.success('Case created successfully', { id: loadingToast });
     } catch (error) {
       toast.error('Failed to create case', { id: loadingToast });
@@ -170,14 +182,30 @@ export default function EvidenceVault() {
   const handleUpload = async (files) => {
     if (!files || files.length === 0) return;
     
-    const loadingToast = toast.loading('Uploading evidence...');
+    const loadingToast = toast.loading('Capturing metadata & uploading...');
+    
+    let metadata = {};
     try {
-      const result = await uploadEvidence(activeCase.id, files);
+      const position = await new Promise((resolve, reject) => {
+        if (!navigator.geolocation) reject('Geolocation not supported');
+        navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 5000 });
+      });
+      metadata.latitude = position.coords.latitude;
+      metadata.longitude = position.coords.longitude;
+      
+      const geoResult = await reverseGeocode(metadata.latitude, metadata.longitude);
+      metadata.address = geoResult.display_name || '';
+    } catch (err) {
+      console.warn("GPS capture failed or denied during upload.");
+    }
+
+    try {
+      const result = await uploadEvidence(activeCase.id, files, metadata);
       const updatedCase = await getVaultCase(activeCase.id);
       setActiveCase(updatedCase);
       setCases(cases.map(c => c.id === activeCase.id ? { ...c, evidence_count: c.evidence_count + files.length } : c));
       loadStatsOnly();
-      toast.success(result.message, { id: loadingToast });
+      toast.success(result.message || 'Evidence uploaded', { id: loadingToast });
     } catch (error) {
       toast.error('Upload failed', { id: loadingToast });
     }
@@ -347,12 +375,15 @@ export default function EvidenceVault() {
 
         <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '20px' }}>
           {loading ? (
-            <p>Loading cases...</p>
+            <p style={{ color: 'var(--text-muted)' }}>Loading cases...</p>
           ) : filteredCases.length === 0 ? (
-            <p>No cases found.</p>
+            <div className="glass-panel" style={{ padding: '30px', textAlign: 'center', gridColumn: '1 / -1' }}>
+              <p style={{ color: 'var(--text-secondary)', fontSize: '16px', margin: 0 }}>No matching cases were found.</p>
+              <p style={{ color: 'var(--text-muted)', fontSize: '14px', marginTop: '5px' }}>Try changing your filters or create a new case.</p>
+            </div>
           ) : (
             filteredCases.map(c => (
-              <div key={c.id} className="glass-panel" style={{ padding: '20px', cursor: 'pointer', transition: 'transform 0.2s' }} onClick={() => handleOpenCase(c.id)}>
+              <div key={c.id} className="glass-panel" style={{ padding: '20px', cursor: 'pointer', transition: 'transform 0.2s', display: 'flex', flexDirection: 'column' }} onClick={() => handleOpenCase(c.id)}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}>
                   <span style={{ fontSize: '12px', padding: '4px 8px', borderRadius: '12px', background: c.status === 'Active' ? 'rgba(255,107,74,0.1)' : 'rgba(255,255,255,0.05)', color: c.status === 'Active' ? 'var(--color-primary)' : 'var(--text-secondary)' }}>
                     {c.status}
@@ -362,10 +393,16 @@ export default function EvidenceVault() {
                   </span>
                 </div>
                 <h3 style={{ margin: '0 0 10px 0' }}>{c.title}</h3>
-                <p style={{ margin: '0 0 15px 0', fontSize: '14px', color: 'var(--text-secondary)' }}>{c.incident_type} • Priority: {c.priority}</p>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '13px', color: 'var(--text-muted)' }}>
-                  <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}><FolderOpen size={14} /> {c.evidence_count} files</span>
-                  <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}><MapPin size={14} /> GPS captured</span>
+                <p style={{ margin: '0 0 15px 0', fontSize: '14px', color: 'var(--text-secondary)', flex: 1 }}>{c.incident_type} • Priority: {c.priority}</p>
+                
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '13px', color: 'var(--text-muted)', borderTop: '1px solid var(--border-glass)', paddingTop: '10px' }}>
+                  <div style={{ display: 'flex', gap: '15px' }}>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }} title="Images"><ImageIcon size={14}/> {c.image_count || 0}</span>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }} title="Videos"><Video size={14}/> {c.video_count || 0}</span>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }} title="Audio"><FileAudio size={14}/> {c.audio_count || 0}</span>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }} title="Documents"><FileText size={14}/> {c.doc_count || 0}</span>
+                  </div>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><MapPin size={14} /> GPS</span>
                 </div>
               </div>
             ))
@@ -479,6 +516,36 @@ export default function EvidenceVault() {
               ))}
             </div>
           </div>
+          
+          {/* NEARBY REPORTS */}
+          <div className="glass-panel" style={{ padding: '20px' }}>
+            <h3 style={{ margin: '0 0 15px 0', borderBottom: '1px solid var(--border-glass)', paddingBottom: '10px' }}>Nearby Related Reports</h3>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              {(() => {
+                const nearby = communityReports
+                  .map(r => ({ ...r, distance: calculateDistance(activeCase.latitude, activeCase.longitude, r.latitude, r.longitude) }))
+                  .filter(r => r.distance <= 10) // within 10km
+                  .sort((a, b) => a.distance - b.distance)
+                  .slice(0, 5); // top 5
+                  
+                if (nearby.length === 0) {
+                  return <p style={{ fontSize: '13px', color: 'var(--text-muted)', margin: 0 }}>No recent community reports found within 10km.</p>;
+                }
+                
+                return nearby.map(r => (
+                  <div key={r.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--bg-panel)', padding: '10px', borderRadius: '8px' }}>
+                    <div>
+                      <div style={{ fontSize: '13px', fontWeight: 'bold', color: 'var(--text-primary)' }}>{r.incident_type}</div>
+                      <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{r.distance.toFixed(1)} km away</div>
+                    </div>
+                    <button onClick={() => navigate(`/reports?highlight=${r.id}`)} style={{ background: 'transparent', border: 'none', color: 'var(--color-primary)', cursor: 'pointer', padding: '5px' }} title="View Original Report">
+                      <Eye size={14} />
+                    </button>
+                  </div>
+                ));
+              })()}
+            </div>
+          </div>
 
         </div>
 
@@ -518,12 +585,13 @@ export default function EvidenceVault() {
           <div className="glass-panel" style={{ padding: '20px' }}>
             <h3 style={{ margin: '0 0 20px 0', display: 'flex', justifyContent: 'space-between' }}>
               Evidence Gallery
-              <span style={{ fontSize: '14px', color: 'var(--text-secondary)' }}>{activeCase.evidence.length} files</span>
+              <span style={{ fontSize: '14px', color: 'var(--text-secondary)' }}>{activeCase.evidence.length} {activeCase.evidence.length === 1 ? 'file' : 'files'}</span>
             </h3>
 
             {activeCase.evidence.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
-                No evidence uploaded yet.
+              <div style={{ textAlign: 'center', padding: '40px' }}>
+                <p style={{ color: 'var(--text-secondary)', fontSize: '16px', margin: 0 }}>No evidence has been uploaded yet.</p>
+                <p style={{ color: 'var(--text-muted)', fontSize: '14px', marginTop: '5px' }}>Drag and drop files in the upload area to add evidence.</p>
               </div>
             ) : (
               <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '20px' }}>
@@ -572,11 +640,19 @@ export default function EvidenceVault() {
                         )}
                       </div>
                       <div style={{ padding: '10px', flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
-                        <div style={{ fontSize: '13px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginBottom: '5px' }} title={ev.file_name}>
+                        <div style={{ fontSize: '13px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginBottom: '8px', fontWeight: 'bold', color: 'var(--text-primary)' }} title={ev.file_name}>
                           {ev.file_name}
                         </div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{new Date(ev.upload_timestamp).toLocaleDateString()}</span>
+                        
+                        <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '10px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                          <div>📅 {new Date(ev.upload_timestamp).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</div>
+                          <div>🕒 {new Date(ev.upload_timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
+                          <div>📄 {ev.file_type.toUpperCase()} {ev.file_type === 'image' || ev.file_type === 'video' || ev.file_type === 'audio' ? '' : 'File'}</div>
+                          <div>📦 {ev.file_size ? (ev.file_size / (1024*1024)).toFixed(2) : '0.00'} MB</div>
+                          {ev.address && <div style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={ev.address}>📍 {ev.address}</div>}
+                        </div>
+
+                        <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', borderTop: '1px solid var(--border-glass)', paddingTop: '8px' }}>
                           <div style={{ display: 'flex', gap: '10px' }}>
                             <a href={fetchUrl} target="_blank" rel="noreferrer" style={{ color: 'var(--text-primary)' }} title="Preview"><Eye size={16} /></a>
                             <a href={fetchUrl} download={ev.file_name} style={{ color: 'var(--color-primary)' }} title="Download"><Download size={16} /></a>
@@ -594,33 +670,69 @@ export default function EvidenceVault() {
       </div>
 
       {/* LIGHTBOX */}
-      {lightboxIndex !== null && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.9)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 3000 }}>
-          <button onClick={() => setLightboxIndex(null)} style={{ position: 'absolute', top: '20px', right: '20px', background: 'transparent', border: 'none', color: 'white', cursor: 'pointer' }}>
-            <X size={32} />
-          </button>
-          
-          <button 
-            onClick={() => setLightboxIndex((lightboxIndex - 1 + activeCase.evidence.filter(e => e.file_type === 'image').length) % activeCase.evidence.filter(e => e.file_type === 'image').length)} 
-            style={{ position: 'absolute', left: '20px', background: 'rgba(255,255,255,0.1)', border: 'none', color: 'white', cursor: 'pointer', padding: '15px', borderRadius: '50%' }}
-          >
-            <ChevronLeft size={32} />
-          </button>
-          
-          <img 
-            src={getUploadUrl(activeCase.evidence.filter(e => e.file_type === 'image')[lightboxIndex].file_path.split(/[\/\\]/).pop())} 
-            alt="Evidence" 
-            style={{ maxHeight: '90vh', maxWidth: '90vw', objectFit: 'contain' }} 
-          />
+      {lightboxIndex !== null && (() => {
+        const images = activeCase.evidence.filter(e => e.file_type === 'image');
+        const currentImage = images[lightboxIndex];
+        
+        return (
+          <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.95)', display: 'flex', zIndex: 3000 }}>
+            <button onClick={() => setLightboxIndex(null)} style={{ position: 'absolute', top: '20px', right: '20px', background: 'rgba(255,255,255,0.1)', border: 'none', color: 'white', cursor: 'pointer', padding: '10px', borderRadius: '50%', zIndex: 3001 }}>
+              <X size={24} />
+            </button>
+            
+            <div style={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center', position: 'relative' }}>
+              <button 
+                onClick={() => setLightboxIndex((lightboxIndex - 1 + images.length) % images.length)} 
+                style={{ position: 'absolute', left: '20px', background: 'rgba(255,255,255,0.1)', border: 'none', color: 'white', cursor: 'pointer', padding: '15px', borderRadius: '50%' }}
+              >
+                <ChevronLeft size={32} />
+              </button>
+              
+              <img 
+                src={getUploadUrl(currentImage.file_path.split(/[\/\\]/).pop())} 
+                alt="Evidence" 
+                style={{ maxHeight: '90vh', maxWidth: '80vw', objectFit: 'contain' }} 
+              />
 
-          <button 
-            onClick={() => setLightboxIndex((lightboxIndex + 1) % activeCase.evidence.filter(e => e.file_type === 'image').length)} 
-            style={{ position: 'absolute', right: '20px', background: 'rgba(255,255,255,0.1)', border: 'none', color: 'white', cursor: 'pointer', padding: '15px', borderRadius: '50%' }}
-          >
-            <ChevronRight size={32} />
-          </button>
-        </div>
-      )}
+              <button 
+                onClick={() => setLightboxIndex((lightboxIndex + 1) % images.length)} 
+                style={{ position: 'absolute', right: '20px', background: 'rgba(255,255,255,0.1)', border: 'none', color: 'white', cursor: 'pointer', padding: '15px', borderRadius: '50%' }}
+              >
+                <ChevronRight size={32} />
+              </button>
+            </div>
+            
+            <div style={{ width: '300px', background: 'var(--bg-panel)', borderLeft: '1px solid var(--border-glass)', padding: '20px', display: 'flex', flexDirection: 'column', color: 'var(--text-primary)', overflowY: 'auto' }}>
+              <h3 style={{ margin: '0 0 20px 0', fontSize: '16px', wordBreak: 'break-all' }}>{currentImage.file_name}</h3>
+              
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '15px', fontSize: '13px', color: 'var(--text-secondary)' }}>
+                <div>
+                  <div style={{ color: 'var(--text-muted)', fontSize: '11px', textTransform: 'uppercase', marginBottom: '2px' }}>Upload Date</div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>📅 {new Date(currentImage.upload_timestamp).toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' })}</div>
+                </div>
+                <div>
+                  <div style={{ color: 'var(--text-muted)', fontSize: '11px', textTransform: 'uppercase', marginBottom: '2px' }}>Upload Time</div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>🕒 {new Date(currentImage.upload_timestamp).toLocaleTimeString()}</div>
+                </div>
+                <div>
+                  <div style={{ color: 'var(--text-muted)', fontSize: '11px', textTransform: 'uppercase', marginBottom: '2px' }}>File Type</div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>📄 {currentImage.file_type.toUpperCase()} Image</div>
+                </div>
+                <div>
+                  <div style={{ color: 'var(--text-muted)', fontSize: '11px', textTransform: 'uppercase', marginBottom: '2px' }}>File Size</div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>📦 {currentImage.file_size ? (currentImage.file_size / (1024*1024)).toFixed(2) : '0.00'} MB</div>
+                </div>
+                {currentImage.address && (
+                  <div>
+                    <div style={{ color: 'var(--text-muted)', fontSize: '11px', textTransform: 'uppercase', marginBottom: '2px' }}>Location</div>
+                    <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-start' }}>📍 <span>{currentImage.address}</span></div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* EDIT MODAL */}
       {isEditModalOpen && (
