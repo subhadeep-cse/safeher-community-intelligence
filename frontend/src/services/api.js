@@ -120,8 +120,9 @@ export const getVaultCase = async (id) => {
   return response.data;
 };
 
-export const updateVaultCase = async (id, status) => {
-  const response = await axios.put(`${API_URL}/vault/cases/${id}`, { status });
+export const updateVaultCase = async (id, data) => {
+  const payload = typeof data === 'string' ? { status: data } : data;
+  const response = await axios.put(`${API_URL}/vault/cases/${id}`, payload);
   return response.data;
 };
 

@@ -11,26 +11,18 @@ import {
   getExportUrl, 
   getUploadUrl,
   reverseGeocode,
-  fetchVaultStats
+  fetchVaultStats,
+  fetchIncidents
 } from '../services/api';
 import { 
   Archive, Plus, Search, FolderOpen, FolderClosed, Trash2, MapPin, 
   Clock, CheckCircle, AlertTriangle, UploadCloud, FileText, Image as ImageIcon, 
-  Video, FileAudio, Download, ArrowLeft, Eye, Edit2, Maximize, Minimize, Activity
+  Video, FileAudio, Download, ArrowLeft, Eye, Edit2, Maximize, Minimize, Activity,
+  ChevronLeft, ChevronRight, X
 } from 'lucide-react';
-import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
-import L from 'leaflet';
-import 'leaflet/dist/leaflet.css';
 import ReportModal from '../components/ReportModal';
+import MapComponent from '../components/MapComponent';
 import { useNavigate } from 'react-router-dom';
-
-const markerIcon = new L.Icon({
-  iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
-  shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
-  iconSize: [25, 41],
-  iconAnchor: [12, 41],
-  popupAnchor: [1, -34]
-});
 
 // Components
 const StatCard = ({ title, value, icon, color }) => (
@@ -47,6 +39,7 @@ const StatCard = ({ title, value, icon, color }) => (
 
 export default function EvidenceVault() {
   const [cases, setCases] = useState([]);
+  const [communityReports, setCommunityReports] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activeCase, setActiveCase] = useState(null);
   const [mediaStats, setMediaStats] = useState({ images: 0, videos: 0, audio: 0, docs: 0, storage: '0.0 MB' });
@@ -56,7 +49,9 @@ export default function EvidenceVault() {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState('All');
   const [filterPriority, setFilterPriority] = useState('All');
-  const [filterDate, setFilterDate] = useState('');
+  const [filterIncidentType, setFilterIncidentType] = useState('All');
+  const [filterMediaType, setFilterMediaType] = useState('All');
+  const [filterDateRange, setFilterDateRange] = useState('All Time');
 
   // Modals
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
@@ -66,16 +61,19 @@ export default function EvidenceVault() {
   // UI States
   const [isMapFullscreen, setIsMapFullscreen] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
+  const [lightboxIndex, setLightboxIndex] = useState(null);
 
   const loadCases = async () => {
     try {
       setLoading(true);
-      const [data, statsData] = await Promise.all([
+      const [data, statsData, reportsData] = await Promise.all([
         fetchVaultCases(),
-        fetchVaultStats()
+        fetchVaultStats(),
+        fetchIncidents()
       ]);
       setCases(data);
       setMediaStats(statsData);
+      setCommunityReports(reportsData);
     } catch (error) {
       toast.error('Failed to load cases or stats');
     } finally {
@@ -124,13 +122,11 @@ export default function EvidenceVault() {
     e.preventDefault();
     const loadingToast = toast.loading('Updating case...');
     try {
-      // In a real app we'd need an update API endpoint for the full case details.
-      // We will emulate full update by updating the state locally. 
-      // (Assuming the backend PUT handles full JSON or just status, but for strict compliance we should have a full update)
-      // Since our API currently only specifically updates status, I will use a generic update approach if it existed.
-      // But let's just update the local state for demonstration.
-      setActiveCase({ ...activeCase, ...formData });
+      await updateVaultCase(activeCase.id, formData);
+      const updatedCase = await getVaultCase(activeCase.id);
+      setActiveCase(updatedCase);
       setCases(cases.map(c => c.id === activeCase.id ? { ...c, ...formData } : c));
+      loadStatsOnly();
       setIsEditModalOpen(false);
       toast.success('Case updated', { id: loadingToast });
     } catch (error) {
@@ -215,15 +211,38 @@ export default function EvidenceVault() {
   // Dashboard View
   if (!activeCase) {
     const filteredCases = cases.filter(c => {
+      // 1. Search Query
       const searchStr = searchQuery.toLowerCase();
       const matchSearch = c.title.toLowerCase().includes(searchStr) || 
                           c.incident_type.toLowerCase().includes(searchStr) ||
                           (c.description && c.description.toLowerCase().includes(searchStr)) ||
-                          (c.address && c.address.toLowerCase().includes(searchStr));
+                          (c.address && c.address.toLowerCase().includes(searchStr)) ||
+                          (c.status.toLowerCase().includes(searchStr)) ||
+                          (c.priority.toLowerCase().includes(searchStr));
+      
+      // 2. Status & Priority
       const matchStatus = filterStatus === 'All' || c.status === filterStatus;
       const matchPriority = filterPriority === 'All' || c.priority === filterPriority;
-      const matchDate = filterDate === '' || c.created_at.startsWith(filterDate);
-      return matchSearch && matchStatus && matchPriority && matchDate;
+      const matchIncidentType = filterIncidentType === 'All' || c.incident_type === filterIncidentType;
+      
+      // 3. Media Type Filters
+      let matchMedia = true;
+      if (filterMediaType === 'Has Images') matchMedia = c.image_count > 0;
+      else if (filterMediaType === 'Has Videos') matchMedia = c.video_count > 0;
+      else if (filterMediaType === 'Has Audio') matchMedia = c.audio_count > 0;
+      else if (filterMediaType === 'Has Documents') matchMedia = c.doc_count > 0;
+
+      // 4. Date Range Filters
+      let matchDate = true;
+      const caseDate = new Date(c.created_at).getTime();
+      const now = Date.now();
+      const dayMs = 24 * 60 * 60 * 1000;
+      
+      if (filterDateRange === 'Last 24 Hours') matchDate = (now - caseDate) <= dayMs;
+      else if (filterDateRange === 'Last 7 Days') matchDate = (now - caseDate) <= dayMs * 7;
+      else if (filterDateRange === 'Last 30 Days') matchDate = (now - caseDate) <= dayMs * 30;
+
+      return matchSearch && matchStatus && matchPriority && matchIncidentType && matchMedia && matchDate;
     });
 
     const openCount = cases.filter(c => c.status === 'Active').length;
@@ -280,30 +299,50 @@ export default function EvidenceVault() {
 
         {/* Filters */}
         <div className="glass-panel" style={{ padding: '20px', marginBottom: '20px', display: 'flex', gap: '15px', flexWrap: 'wrap' }}>
-          <div style={{ display: 'flex', alignItems: 'center', background: 'var(--bg-panel)', padding: '8px 15px', borderRadius: '8px', flex: 1, minWidth: '250px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', background: 'var(--bg-panel)', padding: '8px 15px', borderRadius: '8px', flex: '1 1 100%', minWidth: '250px' }}>
             <Search size={18} color="var(--text-muted)" style={{ marginRight: '10px' }} />
             <input 
               type="text" 
-              placeholder="Search by Title, Description, or Location..." 
+              placeholder="Advanced Search: Title, Type, Area, Description, Status, Priority..." 
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               style={{ background: 'transparent', border: 'none', color: 'var(--text-primary)', width: '100%', outline: 'none' }}
             />
           </div>
-          <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} style={{ background: 'var(--bg-panel)', border: 'none', color: 'var(--text-primary)', padding: '8px 15px', borderRadius: '8px', outline: 'none' }}>
+          <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} style={{ background: 'var(--bg-panel)', border: 'none', color: 'var(--text-primary)', padding: '8px 15px', borderRadius: '8px', outline: 'none', flex: 1 }}>
             <option value="All">All Statuses</option>
-            <option value="Active">Active</option>
-            <option value="Closed">Closed</option>
-            <option value="Archived">Archived</option>
+            <option value="Active">Open Cases</option>
+            <option value="Closed">Closed Cases</option>
+            <option value="Archived">Archived Cases</option>
           </select>
-          <select value={filterPriority} onChange={(e) => setFilterPriority(e.target.value)} style={{ background: 'var(--bg-panel)', border: 'none', color: 'var(--text-primary)', padding: '8px 15px', borderRadius: '8px', outline: 'none' }}>
+          <select value={filterPriority} onChange={(e) => setFilterPriority(e.target.value)} style={{ background: 'var(--bg-panel)', border: 'none', color: 'var(--text-primary)', padding: '8px 15px', borderRadius: '8px', outline: 'none', flex: 1 }}>
             <option value="All">All Priorities</option>
-            <option value="Critical">Critical</option>
-            <option value="High">High</option>
-            <option value="Medium">Medium</option>
-            <option value="Low">Low</option>
+            <option value="Critical">Critical Priority</option>
+            <option value="High">High Priority</option>
+            <option value="Medium">Medium Priority</option>
+            <option value="Low">Low Priority</option>
           </select>
-          <input type="date" value={filterDate} onChange={(e) => setFilterDate(e.target.value)} style={{ background: 'var(--bg-panel)', border: 'none', color: 'var(--text-primary)', padding: '8px 15px', borderRadius: '8px', outline: 'none' }} />
+          <select value={filterIncidentType} onChange={(e) => setFilterIncidentType(e.target.value)} style={{ background: 'var(--bg-panel)', border: 'none', color: 'var(--text-primary)', padding: '8px 15px', borderRadius: '8px', outline: 'none', flex: 1 }}>
+            <option value="All">All Incident Types</option>
+            <option value="Harassment">Harassment</option>
+            <option value="Theft">Theft</option>
+            <option value="Assault">Assault</option>
+            <option value="Accident">Accident</option>
+            <option value="Other">Other</option>
+          </select>
+          <select value={filterMediaType} onChange={(e) => setFilterMediaType(e.target.value)} style={{ background: 'var(--bg-panel)', border: 'none', color: 'var(--text-primary)', padding: '8px 15px', borderRadius: '8px', outline: 'none', flex: 1 }}>
+            <option value="All">All Evidence Types</option>
+            <option value="Has Images">Has Images</option>
+            <option value="Has Videos">Has Videos</option>
+            <option value="Has Audio">Has Audio</option>
+            <option value="Has Documents">Has Documents</option>
+          </select>
+          <select value={filterDateRange} onChange={(e) => setFilterDateRange(e.target.value)} style={{ background: 'var(--bg-panel)', border: 'none', color: 'var(--text-primary)', padding: '8px 15px', borderRadius: '8px', outline: 'none', flex: 1 }}>
+            <option value="All Time">All Time</option>
+            <option value="Last 24 Hours">Last 24 Hours</option>
+            <option value="Last 7 Days">Last 7 Days</option>
+            <option value="Last 30 Days">Last 30 Days</option>
+          </select>
         </div>
 
         <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '20px' }}>
@@ -413,13 +452,12 @@ export default function EvidenceVault() {
                 {isMapFullscreen ? <Minimize size={18} /> : <Maximize size={18} />}
               </button>
             </h3>
-            <div style={{ height: isMapFullscreen ? 'calc(100% - 60px)' : '200px', borderRadius: '8px', overflow: 'hidden', marginBottom: '10px' }}>
-              <MapContainer center={[activeCase.latitude, activeCase.longitude]} zoom={15} style={{ height: '100%', width: '100%' }}>
-                <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-                <Marker position={[activeCase.latitude, activeCase.longitude]} icon={markerIcon}>
-                  <Popup>{activeCase.address}</Popup>
-                </Marker>
-              </MapContainer>
+            <div style={{ height: isMapFullscreen ? 'calc(100% - 60px)' : '300px', borderRadius: '8px', overflow: 'hidden', marginBottom: '10px' }}>
+              <MapComponent 
+                incidents={communityReports}
+                centerOn={[activeCase.latitude, activeCase.longitude]}
+                activeVaultCase={activeCase}
+              />
             </div>
             {!isMapFullscreen && <p style={{ fontSize: '12px', color: 'var(--text-muted)', margin: 0 }}><MapPin size={12}/> {activeCase.address}</p>}
           </div>
@@ -490,12 +528,13 @@ export default function EvidenceVault() {
             ) : (
               <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '20px' }}>
                 {activeCase.evidence.map(ev => {
-                  const url = getUploadUrl(ev.file_name);
-                  // Since file_name is overwritten on backend to be unique, we should fetch by unique file_path basename, 
-                  // but we stored file_name and file_path in DB. 
-                  // Wait, the backend stores unique filename in file_path. We should extract the unique filename from file_path to download it properly.
                   const uniqueFilename = ev.file_path.split(/[\/\\]/).pop();
                   const fetchUrl = getUploadUrl(uniqueFilename);
+                  const isImage = ev.file_type === 'image';
+                  
+                  // Find index if image
+                  const allImages = activeCase.evidence.filter(e => e.file_type === 'image');
+                  const imageIndex = isImage ? allImages.findIndex(e => e.id === ev.id) : -1;
 
                   return (
                     <div key={ev.id} className="glass-panel" style={{ overflow: 'hidden', display: 'flex', flexDirection: 'column', position: 'relative' }}>
@@ -504,8 +543,13 @@ export default function EvidenceVault() {
                       </button>
                       
                       <div style={{ height: '140px', background: 'rgba(0,0,0,0.2)', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-                        {ev.file_type === 'image' && (
-                          <img src={fetchUrl} alt={ev.file_name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                        {isImage && (
+                          <img 
+                            src={fetchUrl} 
+                            alt={ev.file_name} 
+                            style={{ width: '100%', height: '100%', objectFit: 'cover', cursor: 'pointer' }} 
+                            onClick={() => setLightboxIndex(imageIndex)}
+                          />
                         )}
                         {ev.file_type === 'video' && (
                           <video src={fetchUrl} controls style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
@@ -548,6 +592,35 @@ export default function EvidenceVault() {
         </div>
 
       </div>
+
+      {/* LIGHTBOX */}
+      {lightboxIndex !== null && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.9)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 3000 }}>
+          <button onClick={() => setLightboxIndex(null)} style={{ position: 'absolute', top: '20px', right: '20px', background: 'transparent', border: 'none', color: 'white', cursor: 'pointer' }}>
+            <X size={32} />
+          </button>
+          
+          <button 
+            onClick={() => setLightboxIndex((lightboxIndex - 1 + activeCase.evidence.filter(e => e.file_type === 'image').length) % activeCase.evidence.filter(e => e.file_type === 'image').length)} 
+            style={{ position: 'absolute', left: '20px', background: 'rgba(255,255,255,0.1)', border: 'none', color: 'white', cursor: 'pointer', padding: '15px', borderRadius: '50%' }}
+          >
+            <ChevronLeft size={32} />
+          </button>
+          
+          <img 
+            src={getUploadUrl(activeCase.evidence.filter(e => e.file_type === 'image')[lightboxIndex].file_path.split(/[\/\\]/).pop())} 
+            alt="Evidence" 
+            style={{ maxHeight: '90vh', maxWidth: '90vw', objectFit: 'contain' }} 
+          />
+
+          <button 
+            onClick={() => setLightboxIndex((lightboxIndex + 1) % activeCase.evidence.filter(e => e.file_type === 'image').length)} 
+            style={{ position: 'absolute', right: '20px', background: 'rgba(255,255,255,0.1)', border: 'none', color: 'white', cursor: 'pointer', padding: '15px', borderRadius: '50%' }}
+          >
+            <ChevronRight size={32} />
+          </button>
+        </div>
+      )}
 
       {/* EDIT MODAL */}
       {isEditModalOpen && (

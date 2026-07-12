@@ -44,10 +44,10 @@ const MapController = ({ centerPos }) => {
   return null;
 };
 
-const MapComponent = ({ incidents, centerOn, searchedLocation, searchRadius }) => {
-  const defaultCenter = incidents.length > 0 
+const MapComponent = ({ incidents, centerOn, searchedLocation, searchRadius, activeVaultCase }) => {
+  const defaultCenter = centerOn || (incidents.length > 0 
     ? [incidents[0].latitude, incidents[0].longitude] 
-    : [28.6139, 77.2090]; 
+    : [28.6139, 77.2090]);
 
   return (
     <div style={{ height: '500px', width: '100%', borderRadius: '16px', overflow: 'hidden', boxShadow: 'var(--glass-shadow)' }}>
@@ -87,10 +87,11 @@ const MapComponent = ({ incidents, centerOn, searchedLocation, searchRadius }) =
             key={inc.id} 
             position={[inc.latitude, inc.longitude]}
             icon={getMarkerIcon(getColorForType(inc.incident_type))}
+            opacity={0.7}
           >
             <Popup>
               <div style={{ color: '#333' }}>
-                <h4 style={{ margin: '0 0 5px 0', color: 'var(--color-primary)' }}>{inc.incident_type}</h4>
+                <h4 style={{ margin: '0 0 5px 0', color: 'var(--color-primary)' }}>{inc.incident_type} (Community Report)</h4>
                 <p style={{ margin: '0 0 5px 0', fontSize: '13px' }}>{inc.description}</p>
                 <div style={{ display: 'flex', gap: '10px', fontSize: '12px', marginTop: '10px' }}>
                   <span style={{ fontWeight: 'bold' }}>Severity: {inc.severity}</span>
@@ -100,6 +101,22 @@ const MapComponent = ({ incidents, centerOn, searchedLocation, searchRadius }) =
             </Popup>
           </Marker>
         ))}
+
+        {activeVaultCase && (
+          <Marker
+            position={[activeVaultCase.latitude, activeVaultCase.longitude]}
+            icon={getMarkerIcon('gold')}
+            zIndexOffset={2000}
+          >
+            <Popup>
+              <div style={{ color: '#333' }}>
+                <h4 style={{ margin: '0 0 5px 0', color: '#ffd700' }}>{activeVaultCase.title}</h4>
+                <p style={{ margin: '0 0 5px 0', fontSize: '13px', fontWeight: 'bold' }}>Active Evidence Case</p>
+                <p style={{ margin: '0 0 5px 0', fontSize: '13px' }}>{activeVaultCase.address}</p>
+              </div>
+            </Popup>
+          </Marker>
+        )}
       </MapContainer>
     </div>
   );

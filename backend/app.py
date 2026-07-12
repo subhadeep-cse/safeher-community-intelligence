@@ -186,10 +186,14 @@ def get_vault_cases():
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        # Get cases with evidence count
+        # Get cases with evidence count and type breakdown
         cursor.execute('''
             SELECT c.*, 
-                   (SELECT COUNT(*) FROM vault_evidence e WHERE e.case_id = c.id) as evidence_count
+                   (SELECT COUNT(*) FROM vault_evidence e WHERE e.case_id = c.id) as evidence_count,
+                   (SELECT COUNT(*) FROM vault_evidence e WHERE e.case_id = c.id AND e.file_type = 'image') as image_count,
+                   (SELECT COUNT(*) FROM vault_evidence e WHERE e.case_id = c.id AND e.file_type = 'video') as video_count,
+                   (SELECT COUNT(*) FROM vault_evidence e WHERE e.case_id = c.id AND e.file_type = 'audio') as audio_count,
+                   (SELECT COUNT(*) FROM vault_evidence e WHERE e.case_id = c.id AND e.file_type IN ('document', 'pdf')) as doc_count
             FROM vault_cases c
             ORDER BY c.created_at DESC
         ''')
@@ -309,15 +313,32 @@ def update_vault_case(id):
     data = request.json
     try:
         status = data.get('status')
+        title = data.get('title')
+        incident_type = data.get('incident_type')
+        priority = data.get('priority')
+        description = data.get('description')
+        notes = data.get('notes')
+
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        cursor.execute("UPDATE vault_cases SET status = ? WHERE id = ?", (status, id))
+        if title and incident_type:
+            # Full update
+            cursor.execute('''
+                UPDATE vault_cases 
+                SET title = ?, incident_type = ?, priority = ?, description = ?, notes = ?, status = ? 
+                WHERE id = ?
+            ''', (title, incident_type, priority, description, notes, status, id))
+            event_desc = "Case Details Edited"
+        else:
+            # Status only update
+            cursor.execute("UPDATE vault_cases SET status = ? WHERE id = ?", (status, id))
+            event_desc = f"Case Status changed to {status}"
         
         cursor.execute('''
             INSERT INTO vault_timeline (case_id, event_description)
             VALUES (?, ?)
-        ''', (id, f"Case Status changed to {status}"))
+        ''', (id, event_desc))
         
         conn.commit()
         
