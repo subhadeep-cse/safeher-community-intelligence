@@ -1,9 +1,18 @@
-from flask import Flask, request, jsonify
+import os
+import io
+import json
+import zipfile
+from datetime import datetime
+from flask import Flask, request, jsonify, send_from_directory, send_file
+from werkzeug.utils import secure_filename
 from flask_cors import CORS
 import sqlite3
 from database import init_db, get_db_connection
 
 app = Flask(__name__)
+app.config['UPLOAD_FOLDER'] = os.path.join(os.path.dirname(__file__), 'uploads')
+os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+
 CORS(app)
 
 # Initialize the database on startup
@@ -73,8 +82,32 @@ def create_incident():
             road, area, city, state, street, locality, neighbourhood, suburb, landmark, postal_code, country
         ))
         
-        conn.commit()
         incident_id = cursor.lastrowid
+        
+        # Automatically create linked Evidence Case
+        vault_title = f"{incident_type} Report"
+        vault_address = [landmark, street, area, city, postal_code]
+        vault_address = ", ".join([p for p in vault_address if p])
+        if not vault_address:
+            vault_address = f"Lat: {latitude}, Lon: {longitude}"
+            
+        # Map severity to priority
+        priority_map = {'Low': 'Low', 'Medium': 'Medium', 'High': 'High', 'Critical': 'Critical'}
+        vault_priority = priority_map.get(severity, 'Medium')
+        
+        cursor.execute('''
+            INSERT INTO vault_cases (title, incident_type, priority, description, latitude, longitude, address, linked_report_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (vault_title, incident_type, vault_priority, description, latitude, longitude, vault_address, incident_id))
+        
+        vault_case_id = cursor.lastrowid
+        
+        cursor.execute('''
+            INSERT INTO vault_timeline (case_id, event_description)
+            VALUES (?, ?)
+        ''', (vault_case_id, f"Case Auto-created from Community Report #{incident_id}"))
+
+        conn.commit()
         
         cursor.execute("SELECT * FROM incident WHERE id = ?", (incident_id,))
         new_incident = cursor.fetchone()
@@ -139,6 +172,293 @@ def delete_incident(id):
         conn.close()
         
         return jsonify({"message": "Incident deleted successfully"}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ==========================================================
+# MODULE 4: EMERGENCY EVIDENCE VAULT APIs
+# ==========================================================
+
+@app.route('/vault/cases', methods=['GET'])
+def get_vault_cases():
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Get cases with evidence count
+        cursor.execute('''
+            SELECT c.*, 
+                   (SELECT COUNT(*) FROM vault_evidence e WHERE e.case_id = c.id) as evidence_count
+            FROM vault_cases c
+            ORDER BY c.created_at DESC
+        ''')
+        cases = [row_to_dict(row) for row in cursor.fetchall()]
+        conn.close()
+        return jsonify(cases), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/vault/cases', methods=['POST'])
+def create_vault_case():
+    data = request.json
+    try:
+        title = data.get('title')
+        incident_type = data.get('incident_type')
+        priority = data.get('priority')
+        description = data.get('description', '')
+        notes = data.get('notes', '')
+        latitude = data.get('latitude')
+        longitude = data.get('longitude')
+        address = data.get('address', '')
+        linked_report_id = data.get('linked_report_id', None)
+        
+        if not title or not incident_type or not priority:
+            return jsonify({"error": "Missing required fields"}), 400
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            INSERT INTO vault_cases (title, incident_type, priority, description, notes, latitude, longitude, address, linked_report_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (title, incident_type, priority, description, notes, latitude, longitude, address, linked_report_id))
+        
+        case_id = cursor.lastrowid
+        
+        cursor.execute('''
+            INSERT INTO vault_timeline (case_id, event_description)
+            VALUES (?, ?)
+        ''', (case_id, "Case Created"))
+        
+        conn.commit()
+        
+        cursor.execute("SELECT * FROM vault_cases WHERE id = ?", (case_id,))
+        new_case = row_to_dict(cursor.fetchone())
+        new_case['evidence_count'] = 0
+        
+        conn.close()
+        return jsonify(new_case), 201
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/vault/cases/<int:id>', methods=['GET'])
+def get_vault_case(id):
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute("SELECT * FROM vault_cases WHERE id = ?", (id,))
+        row = cursor.fetchone()
+        if not row:
+            conn.close()
+            return jsonify({"error": "Case not found"}), 404
+            
+        case = row_to_dict(row)
+        
+        cursor.execute("SELECT * FROM vault_evidence WHERE case_id = ? ORDER BY upload_timestamp DESC", (id,))
+        case['evidence'] = [row_to_dict(r) for r in cursor.fetchall()]
+        
+        cursor.execute("SELECT * FROM vault_timeline WHERE case_id = ? ORDER BY timestamp ASC", (id,))
+        case['timeline'] = [row_to_dict(r) for r in cursor.fetchall()]
+        
+        conn.close()
+        return jsonify(case), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/vault/cases/<int:id>', methods=['PUT'])
+def update_vault_case(id):
+    data = request.json
+    try:
+        status = data.get('status')
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute("UPDATE vault_cases SET status = ? WHERE id = ?", (status, id))
+        
+        cursor.execute('''
+            INSERT INTO vault_timeline (case_id, event_description)
+            VALUES (?, ?)
+        ''', (id, f"Case Status changed to {status}"))
+        
+        conn.commit()
+        
+        cursor.execute("SELECT * FROM vault_cases WHERE id = ?", (id,))
+        updated = row_to_dict(cursor.fetchone())
+        conn.close()
+        return jsonify(updated), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/vault/cases/<int:id>', methods=['DELETE'])
+def delete_vault_case(id):
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute("SELECT file_path FROM vault_evidence WHERE case_id = ?", (id,))
+        evidence_files = cursor.fetchall()
+        
+        for ev in evidence_files:
+            file_path = ev['file_path']
+            if os.path.exists(file_path):
+                try:
+                    os.remove(file_path)
+                except Exception as e:
+                    print(f"Error removing file {file_path}: {e}")
+                    
+        cursor.execute("DELETE FROM vault_cases WHERE id = ?", (id,))
+        conn.commit()
+        conn.close()
+        return jsonify({"message": "Case and evidence deleted"}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/vault/cases/<int:id>/evidence', methods=['POST'])
+def upload_evidence(id):
+    if 'file' not in request.files:
+        return jsonify({"error": "No file part"}), 400
+        
+    files = request.files.getlist('file')
+    if not files or files[0].filename == '':
+        return jsonify({"error": "No selected file"}), 400
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    uploaded_evidence = []
+    
+    try:
+        for file in files:
+            filename = secure_filename(file.filename)
+            # Create a unique filename to avoid overwriting
+            unique_filename = f"{datetime.now().strftime('%Y%m%d%H%M%S')}_{filename}"
+            file_path = os.path.join(app.config['UPLOAD_FOLDER'], unique_filename)
+            
+            file.save(file_path)
+            
+            # Determine type
+            file_type = 'document'
+            mime = file.mimetype
+            if mime.startswith('image/'): file_type = 'image'
+            elif mime.startswith('video/'): file_type = 'video'
+            elif mime.startswith('audio/'): file_type = 'audio'
+            elif mime == 'application/pdf': file_type = 'pdf'
+            
+            cursor.execute('''
+                INSERT INTO vault_evidence (case_id, file_name, file_type, file_path)
+                VALUES (?, ?, ?, ?)
+            ''', (id, filename, file_type, file_path))
+            
+            ev_id = cursor.lastrowid
+            
+            cursor.execute('''
+                INSERT INTO vault_timeline (case_id, event_description)
+                VALUES (?, ?)
+            ''', (id, f"Uploaded {file_type}: {filename}"))
+            
+            cursor.execute("SELECT * FROM vault_evidence WHERE id = ?", (ev_id,))
+            uploaded_evidence.append(row_to_dict(cursor.fetchone()))
+            
+        conn.commit()
+    except Exception as e:
+        conn.close()
+        return jsonify({"error": str(e)}), 500
+        
+    conn.close()
+    return jsonify({"message": "Files uploaded", "evidence": uploaded_evidence}), 201
+
+@app.route('/vault/cases/<int:id>/evidence/<int:ev_id>', methods=['DELETE'])
+def delete_evidence(id, ev_id):
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute("SELECT file_name, file_path FROM vault_evidence WHERE id = ? AND case_id = ?", (ev_id, id))
+        row = cursor.fetchone()
+        
+        if not row:
+            conn.close()
+            return jsonify({"error": "Evidence not found"}), 404
+            
+        file_path = row['file_path']
+        file_name = row['file_name']
+        
+        if os.path.exists(file_path):
+            os.remove(file_path)
+            
+        cursor.execute("DELETE FROM vault_evidence WHERE id = ?", (ev_id,))
+        
+        cursor.execute('''
+            INSERT INTO vault_timeline (case_id, event_description)
+            VALUES (?, ?)
+        ''', (id, f"Deleted evidence: {file_name}"))
+        
+        conn.commit()
+        conn.close()
+        return jsonify({"message": "Evidence deleted"}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/uploads/<filename>')
+def uploaded_file(filename):
+    return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
+
+@app.route('/vault/cases/<int:id>/export', methods=['GET'])
+def export_case(id):
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute("SELECT * FROM vault_cases WHERE id = ?", (id,))
+        case_row = cursor.fetchone()
+        if not case_row:
+            conn.close()
+            return jsonify({"error": "Case not found"}), 404
+            
+        case = row_to_dict(case_row)
+        
+        cursor.execute("SELECT * FROM vault_evidence WHERE case_id = ?", (id,))
+        evidence = [row_to_dict(r) for r in cursor.fetchall()]
+        
+        cursor.execute("SELECT * FROM vault_timeline WHERE case_id = ? ORDER BY timestamp ASC", (id,))
+        timeline = [row_to_dict(r) for r in cursor.fetchall()]
+        conn.close()
+        
+        memory_file = io.BytesIO()
+        with zipfile.ZipFile(memory_file, 'w', zipfile.ZIP_DEFLATED) as zf:
+            # Add metadata JSON
+            export_data = {
+                "metadata": case,
+                "timeline": timeline,
+                "evidence_list": evidence
+            }
+            zf.writestr('case_metadata.json', json.dumps(export_data, indent=4))
+            
+            # Add text summary
+            summary = f"CASE EXPORT: {case['title']}\n"
+            summary += f"Status: {case['status']}\nPriority: {case['priority']}\n"
+            summary += f"Location: {case['latitude']}, {case['longitude']} ({case['address']})\n"
+            summary += f"Description: {case['description']}\n\nTimeline:\n"
+            for t in timeline:
+                summary += f"[{t['timestamp']}] {t['event_description']}\n"
+            zf.writestr('case_summary.txt', summary)
+            
+            # Add files
+            for ev in evidence:
+                if os.path.exists(ev['file_path']):
+                    # Prepend unique id to avoid filename collisions inside zip if names are same
+                    zf.write(ev['file_path'], f"evidence/{ev['id']}_{ev['file_name']}")
+                    
+        memory_file.seek(0)
+        
+        return send_file(
+            memory_file,
+            mimetype='application/zip',
+            as_attachment=True,
+            download_name=f"Case_{id}_Export.zip"
+        )
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 

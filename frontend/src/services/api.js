@@ -95,3 +95,55 @@ export const searchLocation = async (query) => {
     return [];
   }
 };
+
+// ==========================================
+// VAULT APIs
+// ==========================================
+
+export const fetchVaultCases = async () => {
+  const response = await axios.get(`${API_URL}/vault/cases`);
+  return response.data;
+};
+
+export const createVaultCase = async (caseData) => {
+  const response = await axios.post(`${API_URL}/vault/cases`, caseData);
+  return response.data;
+};
+
+export const getVaultCase = async (id) => {
+  const response = await axios.get(`${API_URL}/vault/cases/${id}`);
+  return response.data;
+};
+
+export const updateVaultCase = async (id, status) => {
+  const response = await axios.put(`${API_URL}/vault/cases/${id}`, { status });
+  return response.data;
+};
+
+export const deleteVaultCase = async (id) => {
+  const response = await axios.delete(`${API_URL}/vault/cases/${id}`);
+  return response.data;
+};
+
+export const uploadEvidence = async (id, files) => {
+  const formData = new FormData();
+  for (let i = 0; i < files.length; i++) {
+    formData.append('file', files[i]);
+  }
+  const response = await axios.post(`${API_URL}/vault/cases/${id}/evidence`, formData, {
+    headers: { 'Content-Type': 'multipart/form-data' }
+  });
+  return response.data;
+};
+
+export const deleteEvidence = async (id, evId) => {
+  const response = await axios.delete(`${API_URL}/vault/cases/${id}/evidence/${evId}`);
+  return response.data;
+};
+
+export const getExportUrl = (id) => {
+  return `${API_URL}/vault/cases/${id}/export`;
+};
+export const getUploadUrl = (filename) => {
+  return `${API_URL}/uploads/${filename}`;
+};

@@ -33,7 +33,7 @@ function MapCenterer({ pos }) {
   return null;
 }
 
-const ReportModal = ({ onClose, onSubmit }) => {
+const ReportModal = ({ onClose, onSubmit, mode = 'community' }) => {
   const [formData, setFormData] = useState({
     incident_type: '', description: '', severity: '',
     latitude: '', longitude: '', image: '',
@@ -124,9 +124,9 @@ const ReportModal = ({ onClose, onSubmit }) => {
     
     if (!formData.incident_type) return setError('Incident type is required.');
     if (!formData.description) return setError('Description is required.');
-    if (!formData.severity) return setError('Severity is required.');
+    if (!formData.severity) return setError(mode === 'vault' ? 'Priority is required.' : 'Severity is required.');
     if (!formData.latitude || !formData.longitude) return setError('Location is required.');
-    if (!formData.anonymous && !formData.reporter_name) return setError('Enter your name or choose Anonymous.');
+    if (mode === 'community' && !formData.anonymous && !formData.reporter_name) return setError('Enter your name or choose Anonymous.');
 
     onSubmit(formData);
   };
@@ -160,33 +160,50 @@ const ReportModal = ({ onClose, onSubmit }) => {
         
         {/* Left Side: Form */}
         <div style={{ flex: 1 }}>
-          <h2 style={{ marginBottom: '20px', color: 'var(--color-primary)' }}>Report Incident</h2>
+          <h2 style={{ marginBottom: '20px', color: 'var(--color-primary)' }}>{mode === 'vault' ? 'Create Private Case' : 'Report Incident'}</h2>
           {error && <div style={{ background: 'rgba(244,63,94,0.2)', border: '1px solid var(--color-danger)', color: '#f8fafc', padding: '10px', borderRadius: '8px', marginBottom: '15px' }}>{error}</div>}
 
           <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
             
-            <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-              <div style={{ flex: 1 }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '5px', marginBottom: '5px', color: 'var(--text-secondary)' }}>
-                  <User size={16} /> Reporter Name
-                </label>
+            {mode === 'community' && (
+              <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                <div style={{ flex: 1 }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '5px', marginBottom: '5px', color: 'var(--text-secondary)' }}>
+                    <User size={16} /> Reporter Name
+                  </label>
+                  <input 
+                    type="text" 
+                    className="glass-panel"
+                    style={{ width: '100%', padding: '10px', color: formData.anonymous ? 'var(--text-muted)' : 'var(--text-primary)', background: formData.anonymous ? 'rgba(0,0,0,0.2)' : 'rgba(255,255,255,0.05)', border: 'none', outline: 'none' }}
+                    value={formData.reporter_name}
+                    onChange={(e) => setFormData({...formData, reporter_name: e.target.value})}
+                    disabled={formData.anonymous}
+                    placeholder={formData.anonymous ? 'Anonymous' : 'Enter your name'}
+                  />
+                </div>
+                <div style={{ marginTop: '22px' }}>
+                  <label className="glass-panel" style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 15px', cursor: 'pointer', background: formData.anonymous ? 'rgba(255,107,74,0.2)' : 'rgba(255,255,255,0.05)', color: formData.anonymous ? 'var(--color-primary)' : 'var(--text-secondary)', borderRadius: '8px' }}>
+                    <input type="checkbox" checked={formData.anonymous} onChange={(e) => setFormData({...formData, anonymous: e.target.checked, reporter_name: e.target.checked ? '' : formData.reporter_name})} style={{ display: 'none' }} />
+                    <UserX size={18} /> Anonymous
+                  </label>
+                </div>
+              </div>
+            )}
+
+            {mode === 'vault' && (
+              <div style={{ marginBottom: '10px' }}>
+                <label style={{ display: 'block', marginBottom: '5px', color: 'var(--text-secondary)' }}>Case Title</label>
                 <input 
                   type="text" 
+                  required
                   className="glass-panel"
-                  style={{ width: '100%', padding: '10px', color: formData.anonymous ? 'var(--text-muted)' : 'var(--text-primary)', background: formData.anonymous ? 'rgba(0,0,0,0.2)' : 'rgba(255,255,255,0.05)', border: 'none', outline: 'none' }}
-                  value={formData.reporter_name}
-                  onChange={(e) => setFormData({...formData, reporter_name: e.target.value})}
-                  disabled={formData.anonymous}
-                  placeholder={formData.anonymous ? 'Anonymous' : 'Enter your name'}
+                  style={{ width: '100%', padding: '10px', color: 'var(--text-primary)', background: 'rgba(255,255,255,0.05)', border: 'none', outline: 'none' }}
+                  value={formData.title || ''}
+                  onChange={(e) => setFormData({...formData, title: e.target.value})}
+                  placeholder="Enter case title"
                 />
               </div>
-              <div style={{ marginTop: '22px' }}>
-                <label className="glass-panel" style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 15px', cursor: 'pointer', background: formData.anonymous ? 'rgba(255,107,74,0.2)' : 'rgba(255,255,255,0.05)', color: formData.anonymous ? 'var(--color-primary)' : 'var(--text-secondary)', borderRadius: '8px' }}>
-                  <input type="checkbox" checked={formData.anonymous} onChange={(e) => setFormData({...formData, anonymous: e.target.checked, reporter_name: e.target.checked ? '' : formData.reporter_name})} style={{ display: 'none' }} />
-                  <UserX size={18} /> Anonymous
-                </label>
-              </div>
-            </div>
+            )}
 
             <div style={{ display: 'flex', gap: '10px' }}>
               <div style={{ flex: 1 }}>
@@ -202,14 +219,14 @@ const ReportModal = ({ onClose, onSubmit }) => {
                 </select>
               </div>
               <div style={{ flex: 1 }}>
-                <label style={{ display: 'block', marginBottom: '5px', color: 'var(--text-secondary)' }}>Severity</label>
+                <label style={{ display: 'block', marginBottom: '5px', color: 'var(--text-secondary)' }}>{mode === 'vault' ? 'Priority' : 'Severity'}</label>
                 <select 
                   className="glass-panel" 
                   style={{ width: '100%', padding: '10px', color: 'var(--text-primary)', background: 'rgba(255,255,255,0.05)' }}
                   value={formData.severity}
                   onChange={(e) => setFormData({...formData, severity: e.target.value})}
                 >
-                  <option value="" style={{ color: '#000' }}>Select severity...</option>
+                  <option value="" style={{ color: '#000' }}>Select {mode === 'vault' ? 'priority' : 'severity'}...</option>
                   {severities.map(s => <option key={s} value={s} style={{ color: '#000' }}>{s}</option>)}
                 </select>
               </div>
@@ -226,19 +243,32 @@ const ReportModal = ({ onClose, onSubmit }) => {
               />
             </div>
 
-            <div>
-              <label className="glass-panel" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', padding: '10px', cursor: 'pointer', background: 'rgba(255,255,255,0.05)', color: 'var(--text-secondary)' }}>
-                <Camera size={18} /> {formData.image ? 'Image Selected' : 'Optional Image Upload'}
-                <input type="file" accept="image/*" onChange={handleImageUpload} style={{ display: 'none' }} />
-              </label>
-            </div>
+            {mode === 'vault' ? (
+              <div style={{ marginBottom: '10px' }}>
+                <label style={{ display: 'block', marginBottom: '5px', color: 'var(--text-secondary)' }}>Notes (Optional)</label>
+                <textarea 
+                  className="glass-panel"
+                  style={{ width: '100%', padding: '10px', color: 'var(--text-primary)', background: 'rgba(255,255,255,0.05)', minHeight: '60px', border: 'none', outline: 'none' }}
+                  value={formData.notes || ''}
+                  onChange={(e) => setFormData({...formData, notes: e.target.value})}
+                  placeholder="Additional notes..."
+                />
+              </div>
+            ) : (
+              <div>
+                <label className="glass-panel" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', padding: '10px', cursor: 'pointer', background: 'rgba(255,255,255,0.05)', color: 'var(--text-secondary)' }}>
+                  <Camera size={18} /> {formData.image ? 'Image Selected' : 'Optional Image Upload'}
+                  <input type="file" accept="image/*" onChange={handleImageUpload} style={{ display: 'none' }} />
+                </label>
+              </div>
+            )}
 
             <div style={{ display: 'flex', gap: '10px', marginTop: '10px' }}>
               <button type="button" onClick={onClose} className="glass-panel" style={{ flex: 1, padding: '12px', cursor: 'pointer', border: '1px solid rgba(255,255,255,0.2)' }}>
                 Cancel
               </button>
               <button type="submit" className="btn-primary" style={{ flex: 1, padding: '12px' }}>
-                Submit Report
+                {mode === 'vault' ? 'Create Case' : 'Submit Report'}
               </button>
             </div>
           </form>

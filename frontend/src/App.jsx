@@ -3,9 +3,10 @@ import { BrowserRouter as Router, Routes, Route, Link, useLocation } from 'react
 import { Toaster, toast } from 'react-hot-toast';
 import Dashboard from './pages/Dashboard';
 import ReportsPage from './pages/ReportsPage';
+import EvidenceVault from './pages/EvidenceVault';
 import ReportModal from './components/ReportModal';
 import { fetchIncidents, createIncident } from './services/api';
-import { AlertTriangle, Map, List, Plus } from 'lucide-react';
+import { AlertTriangle, Map, List, Plus, Archive } from 'lucide-react';
 import './index.css';
 
 function Layout({ children, onOpenModal }) {
@@ -35,6 +36,9 @@ function Layout({ children, onOpenModal }) {
           </Link>
           <Link to="/reports" style={{ color: location.pathname === '/reports' ? 'var(--color-primary)' : 'var(--text-primary)', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '5px' }}>
             <List size={20} /> Community Reports
+          </Link>
+          <Link to="/vault" style={{ color: location.pathname === '/vault' ? 'var(--color-primary)' : 'var(--text-primary)', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '5px' }}>
+            <Archive size={20} /> Evidence Vault
           </Link>
           <button onClick={toggleTheme} className="glass-panel" style={{ padding: '8px 12px', border: 'none', cursor: 'pointer', borderRadius: '8px', color: 'var(--text-primary)' }}>
             {theme === 'night' ? '☀️ Day Mode' : '🌙 Night Mode'}
@@ -113,6 +117,7 @@ function App() {
         <Routes>
           <Route path="/" element={<Dashboard incidents={incidents} loading={loading} error={error} onIncidentUpdated={handleIncidentUpdated} mapCenter={mapCenter} />} />
           <Route path="/reports" element={<ReportsPage incidents={incidents} loading={loading} error={error} onIncidentUpdated={handleIncidentUpdated} />} />
+          <Route path="/vault" element={<EvidenceVault />} />
         </Routes>
       </Layout>
 

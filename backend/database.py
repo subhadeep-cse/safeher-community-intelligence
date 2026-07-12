@@ -41,6 +41,45 @@ def init_db():
         )
     ''')
     
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS vault_cases (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            incident_type TEXT NOT NULL,
+            priority TEXT NOT NULL,
+            description TEXT,
+            notes TEXT,
+            latitude REAL,
+            longitude REAL,
+            address TEXT,
+            status TEXT DEFAULT 'Active',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            linked_report_id INTEGER
+        )
+    ''')
+
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS vault_evidence (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            case_id INTEGER NOT NULL,
+            file_name TEXT NOT NULL,
+            file_type TEXT NOT NULL,
+            file_path TEXT NOT NULL,
+            upload_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(case_id) REFERENCES vault_cases(id) ON DELETE CASCADE
+        )
+    ''')
+
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS vault_timeline (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            case_id INTEGER NOT NULL,
+            event_description TEXT NOT NULL,
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(case_id) REFERENCES vault_cases(id) ON DELETE CASCADE
+        )
+    ''')
+    
     # Check if new columns exist in existing table (Migration logic)
     cursor.execute("PRAGMA table_info(incident)")
     columns = [info['name'] for info in cursor.fetchall()]
@@ -49,6 +88,12 @@ def init_db():
     for col in new_columns:
         if col not in columns:
             cursor.execute(f"ALTER TABLE incident ADD COLUMN {col} TEXT")
+
+    # Migration for vault_cases
+    cursor.execute("PRAGMA table_info(vault_cases)")
+    vault_columns = [info['name'] for info in cursor.fetchall()]
+    if 'linked_report_id' not in vault_columns:
+        cursor.execute("ALTER TABLE vault_cases ADD COLUMN linked_report_id INTEGER")
 
     conn.commit()
     conn.close()
