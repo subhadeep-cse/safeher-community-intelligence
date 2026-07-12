@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { MapContainer, TileLayer, Marker, Popup, useMap, Circle } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, useMap, Circle, Polyline } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 
@@ -44,7 +44,7 @@ const MapController = ({ centerPos }) => {
   return null;
 };
 
-const MapComponent = ({ incidents, centerOn, searchedLocation, searchRadius, activeVaultCase }) => {
+const MapComponent = ({ incidents = [], centerOn, searchedLocation, searchRadius, activeVaultCase, routes = [] }) => {
   const defaultCenter = centerOn || (incidents.length > 0 
     ? [incidents[0].latitude, incidents[0].longitude] 
     : [28.6139, 77.2090]);
@@ -117,6 +117,30 @@ const MapComponent = ({ incidents, centerOn, searchedLocation, searchRadius, act
             </Popup>
           </Marker>
         )}
+
+        {routes.map((route, index) => {
+          const colors = ['#007bff', '#ff8c00', '#8a2be2', '#28a745']; // Blue, Orange, Purple
+          return (
+            <Polyline 
+              key={route.id || index} 
+              positions={route.path} 
+              pathOptions={{ color: colors[index % colors.length], weight: 6, opacity: 0.8 }} 
+            >
+              <Popup>
+                <div style={{ color: '#333' }}>
+                  <h4 style={{ margin: '0 0 5px 0', color: colors[index % colors.length] }}>Route Option {String.fromCharCode(65 + index)}</h4>
+                  <p style={{ margin: 0, fontSize: '13px' }}>Distance: {(route.distance_meters / 1000).toFixed(1)} km</p>
+                  <p style={{ margin: 0, fontSize: '13px' }}>Time: {Math.round(route.duration_seconds / 60)} mins</p>
+                  {route.community_reports && (
+                    <p style={{ margin: '5px 0 0 0', fontSize: '13px', fontWeight: 'bold' }}>
+                      Reports: {route.community_reports.Total}
+                    </p>
+                  )}
+                </div>
+              </Popup>
+            </Polyline>
+          );
+        })}
       </MapContainer>
     </div>
   );

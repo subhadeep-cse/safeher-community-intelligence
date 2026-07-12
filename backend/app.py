@@ -8,6 +8,9 @@ from werkzeug.utils import secure_filename
 from flask_cors import CORS
 import sqlite3
 from database import init_db, get_db_connection
+from dotenv import load_dotenv
+
+load_dotenv()
 
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = os.path.join(os.path.dirname(__file__), 'uploads')
@@ -525,6 +528,43 @@ def export_case(id):
             download_name=f"Case_{id}_Export.zip"
         )
     except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+from routing_service import get_routes
+from traffic_service import get_traffic_status
+from intelligence_service import analyze_routes_with_reports
+
+@app.route('/api/intelligence/analyze-routes', methods=['POST'])
+def analyze_routes():
+    data = request.json
+    try:
+        start_coords = data.get('start_coords')
+        end_coords = data.get('end_coords')
+        mode = data.get('mode', 'walking')
+        
+        if not start_coords or not end_coords:
+            return jsonify({"error": "Missing coordinates"}), 400
+            
+        # 1. Generate Routes
+        routes = get_routes(start_coords, end_coords, mode)
+        
+        # 2. Analyze Traffic
+        traffic_status = get_traffic_status(start_coords, end_coords)
+        
+        # 3. Analyze Community Reports Intersection
+        analyzed_routes = analyze_routes_with_reports(routes)
+        
+        # Inject traffic status into summary
+        for r in analyzed_routes:
+            r['traffic_status'] = traffic_status
+            
+        return jsonify({
+            "routes": analyzed_routes,
+            "overall_traffic": traffic_status
+        }), 200
+        
+    except Exception as e:
+        print(f"Analysis Error: {e}")
         return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
