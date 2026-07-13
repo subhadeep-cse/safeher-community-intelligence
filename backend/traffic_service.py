@@ -69,10 +69,21 @@ def analyze_route_traffic(route_path):
             elif ratio < 0.6: seg_color = "orange"
             elif ratio < 0.8: seg_color = "yellow"
             
-        segments.append({
+        seg_data = {
             "path": chunk_path,
-            "color": seg_color
-        })
+            "color": seg_color,
+            "flow_data": None
+        }
+        
+        if flow:
+            seg_data["flow_data"] = {
+                "currentSpeed": flow.get('currentSpeed'),
+                "freeFlowSpeed": flow.get('freeFlowSpeed'),
+                "confidence": flow.get('confidence', 1.0),
+                "timestamp": time.time()
+            }
+            
+        segments.append(seg_data)
             
     if valid_samples == 0:
         return {"score": 50, "status": "Clear Traffic (Estimated)", "color": "green", "details": {"congestion_ratio": 1.0}, "segments": segments}

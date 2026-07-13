@@ -1,5 +1,5 @@
-import React, { useEffect } from 'react';
-import { MapContainer, TileLayer, Marker, Popup, useMap, Circle, Polyline } from 'react-leaflet';
+import React, { useEffect, useState } from 'react';
+import { MapContainer, TileLayer, Marker, Popup, Tooltip, useMap, Circle, Polyline } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 
@@ -45,9 +45,11 @@ const MapController = ({ centerPos }) => {
 };
 
 const MapComponent = ({ incidents = [], centerOn, searchedLocation, searchRadius, activeVaultCase, routes = [], selectedRouteIndex = 0, setSelectedRouteIndex, getRouteColor }) => {
+  const [selectedTrafficSegment, setSelectedTrafficSegment] = useState(null);
+  
   const defaultCenter = centerOn || (incidents.length > 0 
     ? [incidents[0].latitude, incidents[0].longitude] 
-    : [28.6139, 77.2090]);
+    : [22.5726, 88.3639]); // Default to Kolkata
 
   return (
     <div style={{ height: '500px', width: '100%', borderRadius: '16px', overflow: 'hidden', boxShadow: 'var(--glass-shadow)', position: 'relative' }}>
@@ -175,7 +177,16 @@ const MapComponent = ({ incidents = [], centerOn, searchedLocation, searchRadius
                   if (c === 'red') return '#dc3545';
                   return 'transparent';
                 };
+                const getTrafficStatusText = (c) => {
+                  if (c === 'green') return 'Free Flow';
+                  if (c === 'yellow') return 'Moderate';
+                  if (c === 'orange') return 'Heavy';
+                  if (c === 'red') return 'Severe Congestion';
+                  return 'Unknown';
+                };
+                
                 const tColor = getTrafficColorHex(seg.color);
+                const isThisTrafficSelected = selectedTrafficSegment?.routeIndex === index && selectedTrafficSegment?.segmentIndex === sIdx;
                 
                 return (
                   <Polyline 
@@ -183,13 +194,46 @@ const MapComponent = ({ incidents = [], centerOn, searchedLocation, searchRadius
                     positions={seg.path} 
                     pathOptions={{ 
                       color: tColor, 
-                      weight: isSelected ? 4 : 2, 
-                      opacity: isSelected ? 0.9 : 0.3,
+                      weight: isThisTrafficSelected ? 8 : (isSelected ? 4 : 2), 
+                      opacity: isThisTrafficSelected ? 1.0 : (isSelected ? 0.9 : 0.3),
                     }}
                     eventHandlers={{
-                      click: () => setSelectedRouteIndex && setSelectedRouteIndex(index)
+                      click: (e) => {
+                        L.DomEvent.stopPropagation(e);
+                        setSelectedTrafficSegment({ routeIndex: index, segmentIndex: sIdx });
+                        if (setSelectedRouteIndex) setSelectedRouteIndex(index);
+                      }
                     }}
-                  />
+                  >
+                    <Tooltip sticky>
+                      <div style={{ textAlign: 'center' }}>
+                        <strong>{getTrafficStatusText(seg.color)}</strong><br/>
+                        TomTom Live Data<br/>
+                        <em>Click for Details</em>
+                      </div>
+                    </Tooltip>
+                    {seg.flow_data && (
+                      <Popup>
+                        <div style={{ color: '#333' }}>
+                          <h4 style={{ margin: '0 0 5px 0', color: tColor }}>Traffic Status: {getTrafficStatusText(seg.color)}</h4>
+                          <p style={{ margin: '0 0 5px 0', fontSize: '13px' }}><strong>Current Speed:</strong> {seg.flow_data.currentSpeed} km/h</p>
+                          <p style={{ margin: '0 0 5px 0', fontSize: '13px' }}><strong>Free Flow Speed:</strong> {seg.flow_data.freeFlowSpeed} km/h</p>
+                          <p style={{ margin: '0 0 5px 0', fontSize: '13px' }}>
+                            <strong>Congestion Level:</strong> {Math.max(0, Math.round((1 - (seg.flow_data.currentSpeed / Math.max(1, seg.flow_data.freeFlowSpeed))) * 100))}%
+                          </p>
+                          {seg.flow_data.freeFlowSpeed > seg.flow_data.currentSpeed && (
+                             <p style={{ margin: '0 0 5px 0', fontSize: '13px' }}>
+                               <strong>Traffic Delay:</strong> Yes
+                             </p>
+                          )}
+                          <div style={{ marginTop: '10px', paddingTop: '10px', borderTop: '1px solid #ddd' }}>
+                            <p style={{ margin: '0 0 3px 0', fontSize: '11px', color: '#666' }}><strong>Traffic Source:</strong> TomTom Traffic Flow API (Live)</p>
+                            <p style={{ margin: 0, fontSize: '11px', color: '#666' }}><strong>Last Updated:</strong> {new Date(seg.flow_data.timestamp * 1000).toLocaleTimeString()}</p>
+                          </div>
+                        </div>
+                      </Popup>
+                    )}
+                  </Polyline>
                 );
               })}
             </React.Fragment>

@@ -31,15 +31,53 @@ def get_time_weight(created_at_str):
     except Exception:
         return 0.5
 
-def get_base_points(incident_type):
+def get_base_points(incident_type, hour):
     t = incident_type.strip().lower()
-    if 'sexual assault' in t or 'rape' in t or 'kidnapping' in t: return 1000
-    if 'harassment' in t or 'stalking' in t or 'molestation' in t: return 500
-    if 'chain snatching' in t or 'robbery' in t: return 300
-    if 'theft' in t: return 100
-    if 'suspicious' in t: return 10
-    if 'unsafe' in t or 'street light' in t or 'streetlight' in t: return 5
-    return 2
+    
+    pts = 2
+    is_severe = False
+    is_dynamic = False
+    
+    if 'sexual assault' in t or 'rape' in t or 'kidnapping' in t or 'attempted assault' in t:
+        pts = 1000
+        is_severe = True
+    elif 'harassment' in t or 'stalking' in t or 'molestation' in t:
+        pts = 500
+        is_severe = True
+    elif 'chain snatching' in t or 'robbery' in t:
+        pts = 300
+        is_severe = True
+    elif 'theft' in t:
+        pts = 100
+    elif 'suspicious' in t:
+        pts = 10
+        is_dynamic = True
+    elif 'unsafe' in t or 'street light' in t or 'streetlight' in t or 'dark road' in t or 'isolated' in t:
+        pts = 5
+        is_dynamic = True
+
+    if 6 <= hour < 12:
+        if 'street light' in t or 'streetlight' in t or 'dark' in t:
+            pts = 1  
+    elif 17 <= hour < 21:
+        if 'isolated' in t or 'unsafe' in t:
+            pts *= 2 
+    elif hour >= 21 or hour < 6:
+        if is_severe:
+            pts *= 3
+        if is_dynamic:
+            pts *= 4
+
+    return pts
+
+def get_road_activity(traffic_score, hour):
+    if 6 <= hour < 21: 
+        if traffic_score < 60: return "Busy / High Activity"
+        elif traffic_score < 80: return "Moderate Activity"
+        else: return "Relatively Quiet"
+    else: 
+        if traffic_score < 70: return "Moderate Activity"
+        else: return "Isolated / Very Quiet"
 
 def fetch_pois(lat, lon, radius=500):
     cache_key = f"{round(lat, 3)},{round(lon, 3)}"
@@ -97,51 +135,67 @@ def get_time_of_day_score():
     else:
         return {"category": "Late Night", "score": 10}
 
-def generate_ai_explanation(route_data, all_routes, radius):
+def generate_ai_explanation(analyzed_routes, radius):
     gemini_key = os.environ.get("GEMINI_API_KEY")
+    explanations = {}
     if not gemini_key:
-        return fallback_explanation(route_data)
+        return explanations
         
     try:
         genai.configure(api_key=gemini_key)
         model = genai.GenerativeModel('gemini-1.5-flash')
         
-        # Summarize other routes for comparison
-        alternatives = ""
-        for r in all_routes:
-            if r['id'] != route_data['id']:
-                alternatives += f"- Route {r['id']}: Distance {r.get('distance_meters')}m, Time {r.get('duration_seconds')}s, Incidents {r.get('community_reports', {}).get('Total', 0)}, Traffic: {r.get('traffic_data', {}).get('status', 'Unknown')}\n"
-        
         prompt = f"""
-You are the AI explanation engine for SafeHer's routing system. The routing engine has already selected the recommended route based on deterministic scoring. 
-Your ONLY job is to explain WHY this route is recommended in a natural, human-friendly way.
-Do NOT invent facts. Only explain the calculated results provided below.
+You are the AI explanation engine for SafeHer's routing system. The routing engine has already selected Route {analyzed_routes[0]['id']} as the recommended route based on a deterministic scoring algorithm.
+Your ONLY job is to explain WHY the recommended route was chosen and WHY the alternative routes were rejected, in a natural, human-friendly way.
+Do NOT invent facts. Only use the structured data provided below.
+
 CRITICAL INSTRUCTIONS:
-1. NEVER output contradictory explanations. If the route's Safety Score is low (e.g. 0/100) or it contains serious incidents (Harassment, Assault), you MUST state this fact honestly. DO NOT say "avoids severe incidents" if incidents > 0. 
-2. If this route is recommended despite having incidents, it is because alternative routes are either worse or it offers significantly lower congestion/distance. You must mention this trade-off explicitly.
-3. The explanation must reference traffic, distance, community incidents, severity, and final score.
+1. Explain WHY the recommended route won. If it is recommended despite incidents, explain the trade-off (e.g. alternative routes had worse incidents).
+2. Explain WHY the alternative routes were rejected.
+3. Explain how current traffic and current time of day influenced the decision.
+4. Mention whether severe incidents outweighed traffic or travel time savings.
+5. Provide the output as a valid JSON object where keys are Route IDs (e.g. "A", "B") and values are the explanation strings. Do not include markdown formatting like ```json in the output, just raw JSON.
 
-Provide a concise summary. 
-Example 1: "Route A is recommended because it avoids severe community incidents despite taking 5 additional minutes. User safety has been prioritized."
-Example 2: "Route B is recommended due to significantly lower congestion, but please exercise caution as there is 1 harassment report within {radius} metres."
+Example Output format:
+{{
+  "A": "Route A is recommended because it avoids severe community incidents despite taking 5 additional minutes. Current time is 9:40 PM and traffic indicates it is relatively quiet, so prioritizing safety is essential. Route B was rejected because it passes within 180m of a reported harassment.",
+  "B": "Route B is rejected due to a nearby harassment report, which is heavily penalized at night.",
+  "C": "Route C is rejected because it takes 15 minutes longer with no significant safety improvements."
+}}
 
-Recommended Route Data:
-Safety Score (Higher is safer): {100 - route_data.get('risk_score', 0)}/100
-Final AI Score (Lower is better): {route_data.get('ranking_score', 0)}
-Distance: {route_data.get('distance_meters', 0)} meters
-Travel Time: {route_data.get('duration_seconds', 0)} seconds
-Traffic: {route_data.get('traffic_data', {}).get('status', 'Unknown')}
-Community Reports within {radius}m: {route_data.get('community_reports', {})}
-Crowd Density: {route_data.get('crowd_intelligence_score', 0)}/100
-
-Alternative Routes:
-{alternatives}
-        """
+Structured Data:
+"""
+        for r in analyzed_routes:
+            prompt += f"""
+Route {r['id']} (Recommended: {r['is_recommended']}):
+- Final Backend Score: {r['ranking_score']} (Lower is better)
+- Safety Score: {100 - r.get('risk_score', 0)}/100
+- Distance: {r.get('distance_meters', 0)} meters
+- Travel Time: {math.ceil(r.get('duration_seconds', 0) / 60)} minutes
+- Local Time: {r.get('current_time')}
+- Traffic Condition: {r.get('traffic_data', {{}}).get('status')}
+- Approximate Road Activity: {r.get('road_activity')}
+- Nearest Harassment: {r.get('nearest_incidents', {{}}).get('Harassment')}m
+- Nearest Theft: {r.get('nearest_incidents', {{}}).get('Theft')}m
+- Nearest Unsafe Road: {r.get('nearest_incidents', {{}}).get('Unsafe Roads')}m
+- Nearest Dark Road: {r.get('nearest_incidents', {{}}).get('Dark Roads')}m
+- Nearest Street Light: {r.get('nearest_incidents', {{}}).get('Broken Street Lights')}m
+- Total Incidents: {r.get('community_reports', {{}}).get('Total', 0)}
+"""
+        import json
         response = model.generate_content(prompt)
-        return response.text.strip()
+        text = response.text.strip()
+        if text.startswith('```json'):
+            text = text[7:-3].strip()
+        elif text.startswith('```'):
+            text = text[3:-3].strip()
+            
+        explanations = json.loads(text)
+        return explanations
     except Exception as e:
         print(f"Gemini AI failed: {e}")
-        return fallback_explanation(route_data)
+        return explanations
 
 def fallback_explanation(route_data):
     return f"This route optimally balances traffic conditions ({route_data.get('traffic_data', {}).get('status')}) and community safety, prioritizing avoidance of severe incidents."
@@ -170,6 +224,18 @@ def analyze_routes_with_reports(routes, radius=500):
         matched_incidents = []
         raw_risk_score = 0.0
         
+        current_hour = datetime.now().hour
+        local_time_str = datetime.now().strftime("%I:%M %p")
+        
+        nearest_incidents = {
+            "Harassment": float('inf'),
+            "Theft": float('inf'),
+            "Unsafe Roads": float('inf'),
+            "Dark Roads": float('inf'),
+            "Broken Street Lights": float('inf'),
+            "Suspicious Activity": float('inf')
+        }
+        
         for report in reports:
             rid = report.get('id')
             rtype = report.get('incident_type', '')
@@ -195,7 +261,7 @@ def analyze_routes_with_reports(routes, radius=500):
                 report_counts[matched_key] += 1
                 
                 weight = get_time_weight(rdate)
-                pts = get_base_points(rtype)
+                pts = get_base_points(rtype, current_hour)
                 raw_risk_score += (pts * weight)
                 
                 matched_incidents.append({
@@ -208,6 +274,20 @@ def analyze_routes_with_reports(routes, radius=500):
                     'severity_pts': pts,
                     'distance_to_route': int(min_dist)
                 })
+                
+            n_key = None
+            if 'harassment' in rtype.lower() or 'stalking' in rtype.lower() or 'molestation' in rtype.lower(): n_key = "Harassment"
+            elif 'theft' in rtype.lower() or 'robbery' in rtype.lower() or 'snatching' in rtype.lower(): n_key = "Theft"
+            elif 'unsafe' in rtype.lower() or 'isolated' in rtype.lower(): n_key = "Unsafe Roads"
+            elif 'dark' in rtype.lower(): n_key = "Dark Roads"
+            elif 'street light' in rtype.lower() or 'streetlight' in rtype.lower(): n_key = "Broken Street Lights"
+            elif 'suspicious' in rtype.lower(): n_key = "Suspicious Activity"
+            
+            if n_key:
+                nearest_incidents[n_key] = min(nearest_incidents[n_key], int(min_dist))
+                
+        for k, v in nearest_incidents.items():
+            if v == float('inf'): nearest_incidents[k] = -1
                 
         community_risk = min(int(round(raw_risk_score)), 100)
         
@@ -241,6 +321,10 @@ def analyze_routes_with_reports(routes, radius=500):
         crowd_intel_score = (congestion_score * 0.60) + (community_risk * 0.15) + (comm_score * 0.10) + (pt_score * 0.10) + (time_score * 0.05)
         crowd_intel_score = int(round(crowd_intel_score))
         
+        route['current_time'] = local_time_str
+        route['road_activity'] = get_road_activity(traffic_data['score'], current_hour)
+        route['nearest_incidents'] = nearest_incidents
+        
         route['community_reports'] = report_counts
         route['matched_incidents'] = matched_incidents
         route['risk_score'] = community_risk
@@ -251,24 +335,24 @@ def analyze_routes_with_reports(routes, radius=500):
         route['visibility'] = get_visibility_score()
         route['crowd_intelligence_score'] = crowd_intel_score
         
-        # Smart Decision Engine Logic: Balance safety with practicality
-        # We want the lowest ranking score. 
-        # Duration is penalized heavily, but extreme risk can override it.
-        # Severe incidents have huge base points (e.g. 500-1000), making them easily outweigh minutes of travel time.
         route['ranking_score'] = route.get('duration_seconds', 0) + raw_risk_score + (congestion_score * 15)
         
         analyzed_routes.append(route)
         
-    # Sort by ranking score
     analyzed_routes.sort(key=lambda x: x['ranking_score'])
     
     for i, route in enumerate(analyzed_routes):
         route['is_recommended'] = (i == 0)
-        if route['is_recommended']:
-            route['ai_explanation'] = generate_ai_explanation(route, analyzed_routes, radius)
-            route['explanation'] = route['ai_explanation']
+
+    gemini_explanations = generate_ai_explanation(analyzed_routes, radius)
+    
+    for route in analyzed_routes:
+        if route['id'] in gemini_explanations:
+            route['explanation'] = gemini_explanations[route['id']]
         else:
-            route['ai_explanation'] = ""
-            route['explanation'] = "Alternative route."
+            if route['is_recommended']:
+                route['explanation'] = fallback_explanation(route)
+            else:
+                route['explanation'] = "Alternative route."
             
     return analyzed_routes

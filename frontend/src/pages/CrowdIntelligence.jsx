@@ -15,7 +15,7 @@ const CrowdIntelligence = ({ incidents }) => {
   const [selectedRouteIndex, setSelectedRouteIndex] = useState(0);
   const [trafficStatus, setTrafficStatus] = useState('');
   const [error, setError] = useState(null);
-  const [mapCenter, setMapCenter] = useState([28.6139, 77.2090]); // Default to Delhi, or some valid center
+  const [mapCenter, setMapCenter] = useState([22.5726, 88.3639]); // Default to Kolkata
 
   const handleSearch = async () => {
     if (!startCoords || !endCoords) {
@@ -67,7 +67,7 @@ const CrowdIntelligence = ({ incidents }) => {
           <div style={{ flex: '1 1 200px' }}>
             <label style={{ display: 'block', fontSize: '12px', color: 'var(--text-muted)', marginBottom: '5px' }}>Origin</label>
             <LocationAutocomplete 
-              placeholder="E.g. Connaught Place, Delhi" 
+              placeholder="E.g. Park Street, Kolkata" 
               onSelect={(res) => setStartCoords([res.lat, res.lon])}
               className="input-field"
               style={{ padding: '0', display: 'flex', alignItems: 'center' }}
@@ -78,7 +78,7 @@ const CrowdIntelligence = ({ incidents }) => {
           <div style={{ flex: '1 1 200px' }}>
             <label style={{ display: 'block', fontSize: '12px', color: 'var(--text-muted)', marginBottom: '5px' }}>Destination</label>
             <LocationAutocomplete 
-              placeholder="E.g. India Gate, Delhi" 
+              placeholder="E.g. Victoria Memorial, Kolkata" 
               onSelect={(res) => setEndCoords([res.lat, res.lon])}
               className="input-field"
               style={{ padding: '0', display: 'flex', alignItems: 'center' }}
@@ -127,7 +127,7 @@ const CrowdIntelligence = ({ incidents }) => {
         )}
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 350px', gap: '20px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 350px', gap: '20px', marginTop: '20px' }}>
         
         {/* MAP AREA */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
@@ -213,18 +213,32 @@ const CrowdIntelligence = ({ incidents }) => {
                   padding: '10px',
                   borderRadius: '8px'
                 }}>
+                  <div style={{ gridColumn: '1 / -1', borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: '5px', marginBottom: '5px' }}>
+                    <strong>Current Local Time:</strong> {route.current_time}
+                  </div>
                   <div><strong>Safety Score:</strong> {100 - (route.risk_score || 0)}/100</div>
                   <div><strong>Traffic Score:</strong> {route.traffic_data?.score || 0}/100</div>
-                  <div><strong>Distance:</strong> {(route.distance_meters / 1000).toFixed(1)} km</div>
-                  <div><strong>Travel Time:</strong> {Math.round(route.duration_seconds / 60)} mins</div>
-                  <div><strong>Total Incidents:</strong> {route.community_reports?.Total || 0}</div>
-                  <div><strong>Nearby Incidents:</strong> {route.matched_incidents?.length || 0}</div>
-                  <div><strong>Harassment:</strong> {route.community_reports?.Harassment || 0}</div>
-                  <div><strong>Theft:</strong> {route.community_reports?.Theft || 0}</div>
-                  <div><strong>Unsafe Roads:</strong> {route.community_reports?.["Unsafe Roads"] || 0}</div>
-                  <div><strong>Dark Roads:</strong> {route.community_reports?.["Broken Street Lights"] || 0}</div>
                   <div><strong>Final AI Score:</strong> {Math.round(route.ranking_score || 0)}</div>
                   <div><strong>Recommendation:</strong> {route.is_recommended ? 'Yes' : 'Alternative'}</div>
+                  <div style={{ gridColumn: '1 / -1', marginTop: '5px', color: '#ffb347' }}>
+                    <strong>Traffic Condition:</strong> {route.traffic_data?.status}
+                  </div>
+                  <div style={{ gridColumn: '1 / -1', color: '#85d7ff' }}>
+                    <strong>Road Activity:</strong> {route.road_activity}
+                  </div>
+                  
+                  <div style={{ gridColumn: '1 / -1', borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: '8px', marginTop: '4px', fontSize: '11px', color: 'var(--text-muted)' }}>
+                    Nearest Incidents (within {radius}m)
+                  </div>
+                  <div><strong>Harassment:</strong> {route.nearest_incidents?.Harassment === -1 ? 'None' : `${route.nearest_incidents?.Harassment}m`}</div>
+                  <div><strong>Theft:</strong> {route.nearest_incidents?.Theft === -1 ? 'None' : `${route.nearest_incidents?.Theft}m`}</div>
+                  <div><strong>Unsafe Road:</strong> {route.nearest_incidents?.["Unsafe Roads"] === -1 ? 'None' : `${route.nearest_incidents?.["Unsafe Roads"]}m`}</div>
+                  <div><strong>Dark Road:</strong> {route.nearest_incidents?.["Dark Roads"] === -1 ? 'None' : `${route.nearest_incidents?.["Dark Roads"]}m`}</div>
+                  <div><strong>Street Light:</strong> {route.nearest_incidents?.["Broken Street Lights"] === -1 ? 'None' : `${route.nearest_incidents?.["Broken Street Lights"]}m`}</div>
+
+                  <div style={{ gridColumn: '1 / -1', borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: '8px', marginTop: '4px' }}>
+                    <strong>Traffic Source:</strong> <span style={{ color: 'var(--color-primary)' }}>TomTom Traffic Flow API (Live)</span>
+                  </div>
                 </div>
 
                 <div style={{ fontSize: '13px', background: 'rgba(0,0,0,0.2)', padding: '10px', borderRadius: '8px', marginBottom: '10px' }}>
