@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Search, Navigation, AlertCircle, Info, Navigation2, Activity } from 'lucide-react';
+import { Search, Navigation, AlertCircle, Info, Navigation2, Activity, Shield } from 'lucide-react';
 import axios from 'axios';
 import MapComponent from '../components/MapComponent';
 import LocationAutocomplete from '../components/LocationAutocomplete';
@@ -157,13 +157,44 @@ const CrowdIntelligence = ({ incidents }) => {
              </div>
           )}
 
+          {routes.length > 0 && !loading && (() => {
+            const allHighRisk = routes.every(r => r.risk_category === "Elevated Risk" || r.risk_category === "High Risk");
+            const allSafe = routes.every(r => r.risk_category === "Safe");
+            
+            if (allHighRisk) {
+              return (
+                <div style={{ marginBottom: '15px', padding: '15px', background: 'rgba(220,53,69,0.1)', border: '1px solid #dc3545', borderRadius: '8px', color: '#fff' }}>
+                  <h4 style={{ margin: '0 0 5px 0', color: '#ff6b4a', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                    <AlertCircle size={18} /> Overall Situation: ⚠ High Risk
+                  </h4>
+                  <p style={{ margin: 0, fontSize: '13px', color: 'var(--text-secondary)' }}>
+                    All available routes pass near reported incidents. No completely safe alternative exists. The recommended route has the lowest overall risk among the available options.
+                  </p>
+                </div>
+              );
+            }
+            if (allSafe) {
+              return (
+                <div style={{ marginBottom: '15px', padding: '15px', background: 'rgba(40,167,69,0.1)', border: '1px solid #28a745', borderRadius: '8px', color: '#fff' }}>
+                  <h4 style={{ margin: '0 0 5px 0', color: '#28a745', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                    <Shield size={18} /> Overall Situation: ✓ Safe Alternatives
+                  </h4>
+                  <p style={{ margin: 0, fontSize: '13px', color: 'var(--text-secondary)' }}>
+                    Multiple safe routes exist. The recommended route balances maximum safety with travel efficiency.
+                  </p>
+                </div>
+              );
+            }
+            return null;
+          })()}
+
           {routes.map((route, index) => {
             const getRiskColor = (score) => {
               if (score < 20) return '#28a745';
               if (score < 50) return '#ffc107';
               return '#dc3545';
             };
-            const riskLevel = route.risk_score < 20 ? 'Low' : (route.risk_score < 50 ? 'Moderate' : 'High');
+            const riskLevel = route.risk_category || (route.risk_score < 20 ? 'Safe' : (route.risk_score < 50 ? 'Moderate Risk' : 'High Risk'));
             const routeColor = getRouteColor(index);
             const isSelected = index === selectedRouteIndex;
             
@@ -216,9 +247,9 @@ const CrowdIntelligence = ({ incidents }) => {
                   <div style={{ gridColumn: '1 / -1', borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: '5px', marginBottom: '5px' }}>
                     <strong>Current Local Time:</strong> {route.current_time}
                   </div>
-                  <div><strong>Safety Score:</strong> {100 - (route.risk_score || 0)}/100</div>
+                  <div><strong>Safety Score:</strong> {route.safety_score_breakdown ? route.safety_score_breakdown.final_safety_score : 100 - (route.risk_score || 0)}/100</div>
                   <div><strong>Traffic Score:</strong> {route.traffic_data?.score || 0}/100</div>
-                  <div><strong>Final AI Score:</strong> {Math.round(route.ranking_score || 0)}</div>
+                  <div style={{ color: 'var(--text-muted)' }}><strong>Internal Decision Score:</strong> {Math.round(route.ranking_score || 0)}</div>
                   <div><strong>Recommendation:</strong> {route.is_recommended ? 'Yes' : 'Alternative'}</div>
                   <div style={{ gridColumn: '1 / -1', marginTop: '5px', color: '#ffb347' }}>
                     <strong>Traffic Condition:</strong> {route.traffic_data?.status}
@@ -230,15 +261,32 @@ const CrowdIntelligence = ({ incidents }) => {
                   <div style={{ gridColumn: '1 / -1', borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: '8px', marginTop: '4px', fontSize: '11px', color: 'var(--text-muted)' }}>
                     Nearest Incidents (within {radius}m)
                   </div>
-                  <div><strong>Harassment:</strong> {route.nearest_incidents?.Harassment === -1 ? 'None' : `${route.nearest_incidents?.Harassment}m`}</div>
-                  <div><strong>Theft:</strong> {route.nearest_incidents?.Theft === -1 ? 'None' : `${route.nearest_incidents?.Theft}m`}</div>
-                  <div><strong>Unsafe Road:</strong> {route.nearest_incidents?.["Unsafe Roads"] === -1 ? 'None' : `${route.nearest_incidents?.["Unsafe Roads"]}m`}</div>
-                  <div><strong>Dark Road:</strong> {route.nearest_incidents?.["Dark Roads"] === -1 ? 'None' : `${route.nearest_incidents?.["Dark Roads"]}m`}</div>
-                  <div><strong>Street Light:</strong> {route.nearest_incidents?.["Broken Street Lights"] === -1 ? 'None' : `${route.nearest_incidents?.["Broken Street Lights"]}m`}</div>
+                  <div><strong>Harassment:</strong><br/>{route.nearest_incidents?.Harassment === -1 ? 'None' : <>{route.nearest_incidents?.Harassment}m<br/><span style={{ fontSize: '11px', color: route.nearest_incidents?.Harassment <= radius ? '#ff4d4d' : 'var(--text-muted)' }}>{route.nearest_incidents?.Harassment <= radius ? 'Inside' : 'Outside'} selected {radius}m safety radius</span></>}</div>
+                  <div><strong>Theft:</strong><br/>{route.nearest_incidents?.Theft === -1 ? 'None' : <>{route.nearest_incidents?.Theft}m<br/><span style={{ fontSize: '11px', color: route.nearest_incidents?.Theft <= radius ? '#ff4d4d' : 'var(--text-muted)' }}>{route.nearest_incidents?.Theft <= radius ? 'Inside' : 'Outside'} selected {radius}m safety radius</span></>}</div>
+                  <div><strong>Unsafe Road:</strong><br/>{route.nearest_incidents?.["Unsafe Roads"] === -1 ? 'None' : <>{route.nearest_incidents?.["Unsafe Roads"]}m<br/><span style={{ fontSize: '11px', color: route.nearest_incidents?.["Unsafe Roads"] <= radius ? '#ffc107' : 'var(--text-muted)' }}>{route.nearest_incidents?.["Unsafe Roads"] <= radius ? 'Inside' : 'Outside'} selected {radius}m safety radius</span></>}</div>
+                  <div><strong>Dark Road:</strong><br/>{route.nearest_incidents?.["Dark Roads"] === -1 ? 'None' : <>{route.nearest_incidents?.["Dark Roads"]}m<br/><span style={{ fontSize: '11px', color: route.nearest_incidents?.["Dark Roads"] <= radius ? '#ffc107' : 'var(--text-muted)' }}>{route.nearest_incidents?.["Dark Roads"] <= radius ? 'Inside' : 'Outside'} selected {radius}m safety radius</span></>}</div>
+                  <div><strong>Street Light:</strong><br/>{route.nearest_incidents?.["Broken Street Lights"] === -1 ? 'None' : <>{route.nearest_incidents?.["Broken Street Lights"]}m<br/><span style={{ fontSize: '11px', color: route.nearest_incidents?.["Broken Street Lights"] <= radius ? '#ffc107' : 'var(--text-muted)' }}>{route.nearest_incidents?.["Broken Street Lights"] <= radius ? 'Inside' : 'Outside'} selected {radius}m safety radius</span></>}</div>
 
                   <div style={{ gridColumn: '1 / -1', borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: '8px', marginTop: '4px' }}>
                     <strong>Traffic Source:</strong> <span style={{ color: 'var(--color-primary)' }}>TomTom Traffic Flow API (Live)</span>
                   </div>
+                </div>
+
+                <div style={{ fontSize: '13px', background: 'rgba(0,0,0,0.2)', padding: '10px', borderRadius: '8px', marginBottom: '10px' }}>
+                  <div style={{ marginBottom: '5px', fontWeight: 'bold' }}>Safety Score Breakdown:</div>
+                  {route.safety_score_breakdown ? (
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '5px', color: 'var(--text-secondary)' }}>
+                      <div>Base Score: <strong>{route.safety_score_breakdown.base_score}</strong></div>
+                      <div>Incident Penalty: <span style={{ color: route.safety_score_breakdown.incident_penalty < 0 ? '#ff4d4d' : 'inherit', fontWeight: 'bold' }}>{route.safety_score_breakdown.incident_penalty}</span></div>
+                      <div>Activity Modifier: <span style={{ color: route.safety_score_breakdown.activity_modifier > 0 ? '#4caf50' : (route.safety_score_breakdown.activity_modifier < 0 ? '#ffc107' : 'inherit'), fontWeight: 'bold' }}>{route.safety_score_breakdown.activity_modifier > 0 ? '+' : ''}{route.safety_score_breakdown.activity_modifier}</span></div>
+                      <div>Time Modifier: <span style={{ color: route.safety_score_breakdown.time_modifier > 0 ? '#4caf50' : (route.safety_score_breakdown.time_modifier < 0 ? '#ffc107' : 'inherit'), fontWeight: 'bold' }}>{route.safety_score_breakdown.time_modifier > 0 ? '+' : ''}{route.safety_score_breakdown.time_modifier}</span></div>
+                      <div style={{ gridColumn: '1 / -1', borderTop: '1px solid rgba(255,255,255,0.1)', marginTop: '5px', paddingTop: '5px', color: 'var(--text-primary)' }}>
+                        <strong>Final Score: {route.safety_score_breakdown.final_safety_score}/100</strong>
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ color: 'var(--text-secondary)' }}>Breakdown not available</div>
+                  )}
                 </div>
 
                 <div style={{ fontSize: '13px', background: 'rgba(0,0,0,0.2)', padding: '10px', borderRadius: '8px', marginBottom: '10px' }}>

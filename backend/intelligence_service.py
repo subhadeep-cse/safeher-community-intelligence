@@ -151,17 +151,18 @@ Your ONLY job is to explain WHY the recommended route was chosen and WHY the alt
 Do NOT invent facts. Only use the structured data provided below.
 
 CRITICAL INSTRUCTIONS:
-1. Explain WHY the recommended route won. If it is recommended despite incidents, explain the trade-off (e.g. alternative routes had worse incidents).
-2. Explain WHY the alternative routes were rejected.
-3. Explain how current traffic and current time of day influenced the decision.
-4. Mention whether severe incidents outweighed traffic or travel time savings.
-5. Provide the output as a valid JSON object where keys are Route IDs (e.g. "A", "B") and values are the explanation strings. Do not include markdown formatting like ```json in the output, just raw JSON.
+1. EXPLICITLY reference the following for every route using clear, separated sentences: Current local time, Traffic condition, Road activity (Busy/Moderate/Quiet/Isolated), Selected safety radius ({radius}m), Exact nearest incident distances, and Travel time/Distance differences compared to other routes.
+2. Radius Context: Instead of just stating the distance, explicitly state whether the incident is "inside the selected {radius}m safety radius" or "outside the selected {radius}m safety radius".
+3. Activity vs Traffic: Traffic speed and Road Activity are independent. State them both. E.g. "Traffic is Free Flow, but the road is Isolated."
+4. Route Comparison: Explain exactly why the recommended route won and why the alternative routes lost. Discuss which specific factors had the biggest influence (e.g. time of day vs. incident severity).
+5. Trade-offs: Explicitly include travel time and route distance when explaining why a route was selected or rejected, especially whenever they meaningfully differ between routes.
+6. Confidence: For each route explanation, append a double newline and then "Confidence: [Very High/High/Medium/Low] - [Short explanation of why]". 
+7. Provide the output as a valid JSON object where keys are the EXACT Route IDs provided below (e.g. "{analyzed_routes[0]['id']}") and values are the full explanation strings. Do not include markdown formatting like ```json in the output.
 
 Example Output format:
 {{
-  "A": "Route A is recommended because it avoids severe community incidents despite taking 5 additional minutes. Current time is 9:40 PM and traffic indicates it is relatively quiet, so prioritizing safety is essential. Route B was rejected because it passes within 180m of a reported harassment.",
-  "B": "Route B is rejected due to a nearby harassment report, which is heavily penalized at night.",
-  "C": "Route C is rejected because it takes 15 minutes longer with no significant safety improvements."
+  "{analyzed_routes[0]['id']}": "Recommended because the nearest harassment incident is 1207 metres away. This lies outside the selected {radius} metre safety radius. Current time is 1:26 AM. Road activity is relatively quiet. No unsafe roads or dark roads were detected. Although late-night travel slightly reduces the Safety Score, this route still provides the best balance between safety and practicality.\\n\\nConfidence: Very High - Avoids all severe incidents within the safety radius.",
+  "tt_route_1": "Route was rejected because it passes within 180 metres of a reported harassment incident, which is inside the selected {radius} metre safety radius. This is heavily penalized at night, despite being 2 minutes faster.\\n\\nConfidence: High - Clear safety violation."
 }}
 
 Structured Data:
@@ -197,8 +198,23 @@ Route {r['id']} (Recommended: {r['is_recommended']}):
         print(f"Gemini AI failed: {e}")
         return explanations
 
-def fallback_explanation(route_data):
-    return f"This route optimally balances traffic conditions ({route_data.get('traffic_data', {}).get('status')}) and community safety, prioritizing avoidance of severe incidents."
+def fallback_explanation(route_data, recommended_route=None):
+    score = route_data.get('safety_score_breakdown', {}).get('final_safety_score', 0)
+    harassment = route_data.get('nearest_incidents', {}).get('Harassment', 'Unknown')
+    time_str = route_data.get('current_time', 'Unknown')
+    activity = route_data.get('road_activity', 'Unknown')
+    traffic = route_data.get('traffic_data', {}).get('status', 'Unknown')
+    
+    if recommended_route is None:
+        return f"Recommended Route: Current time is {time_str}. Road activity is {activity}. Traffic is {traffic}. Nearest harassment is {harassment}m away. With a Safety Score of {score}/100, this route provides the best available balance of safety and practicality."
+    else:
+        time_diff = math.ceil(route_data.get('duration_seconds', 0) / 60) - math.ceil(recommended_route.get('duration_seconds', 0) / 60)
+        dist_diff = route_data.get('distance_meters', 0) - recommended_route.get('distance_meters', 0)
+        
+        t_str = f"{abs(time_diff)} mins {'faster' if time_diff < 0 else 'slower'}" if time_diff != 0 else "same travel time"
+        d_str = f"{abs(dist_diff)}m {'shorter' if dist_diff < 0 else 'longer'}" if dist_diff != 0 else "same distance"
+        
+        return f"Alternative Route: Ranked lower due to a Safety Score of {score}/100. Nearest harassment is {harassment}m away. Traffic is {traffic}. It is {t_str} and {d_str} than the recommended route, but does not offer a better overall balance of safety and practicality."
 
 def analyze_routes_with_reports(routes, radius=500):
     try:
@@ -244,11 +260,23 @@ def analyze_routes_with_reports(routes, radius=500):
             rdate = report.get('created_at')
             
             min_dist = float('inf')
-            for point in path:
+            # Exclude first and last 5% of points (if enough points exist) 
+            # to ensure unique middle sections determine route differences.
+            trim_idx = max(1, len(path) // 20)
+            search_path = path[trim_idx:-trim_idx] if len(path) > 20 else path
+            
+            for point in search_path:
                 dist = haversine(rlat, rlon, point[0], point[1])
                 if dist < min_dist:
                     min_dist = dist
                     
+            weight = get_time_weight(rdate)
+            pts = get_base_points(rtype, current_hour)
+            
+            # Continuous Risk Math - Applied to ALL incidents
+            decay_factor = 200.0 / (min_dist + 200.0)
+            raw_risk_score += (pts * weight * decay_factor)
+            
             if min_dist <= radius:
                 report_counts["Total"] += 1
                 matched_key = "Other"
@@ -259,10 +287,6 @@ def analyze_routes_with_reports(routes, radius=500):
                 if "Broken Street Light" in rtype: matched_key = "Broken Street Lights"
                 if "Unsafe Road" in rtype: matched_key = "Unsafe Roads"
                 report_counts[matched_key] += 1
-                
-                weight = get_time_weight(rdate)
-                pts = get_base_points(rtype, current_hour)
-                raw_risk_score += (pts * weight)
                 
                 matched_incidents.append({
                     'id': rid,
@@ -289,13 +313,30 @@ def analyze_routes_with_reports(routes, radius=500):
         for k, v in nearest_incidents.items():
             if v == float('inf'): nearest_incidents[k] = -1
                 
-        community_risk = min(int(round(raw_risk_score)), 100)
+        import math
         
-        # 1. Traffic Analysis
+        # Base safety score starts at 95.
+        base_score = 95.0
+        
+        # 1. Incident Penalty: Asymptotically map raw_risk_score to a penalty between 0 and 70
+        incident_penalty = 70.0 * (1.0 - math.exp(-raw_risk_score / 1500.0))
+        
+        # 2. Traffic Analysis
         traffic_data = analyze_route_traffic(path)
-        congestion_score = 100 - traffic_data['score'] # High congestion = high score
+        congestion_score = 100 - traffic_data['score'] 
         
-        # 2. POI Analysis (Commercial & Public Transport)
+        # Road Activity (influences safety independently of traffic)
+        road_activity_str = get_road_activity(traffic_data['score'], current_hour)
+        if "Busy" in road_activity_str:
+            activity_modifier = 2.0
+        elif "Isolated" in road_activity_str:
+            activity_modifier = -8.0
+        elif "Relatively Quiet" in road_activity_str:
+            activity_modifier = -3.0
+        else:
+            activity_modifier = 0.0
+        
+        # 3. POI Analysis (Commercial & Public Transport)
         num_samples = min(3, max(1, len(path)))
         step = max(1, len(path) // num_samples)
         samples = [path[i] for i in range(0, len(path), step)][:num_samples]
@@ -313,17 +354,53 @@ def analyze_routes_with_reports(routes, radius=500):
         comm_score = min(100, int((avg_comm / 50.0) * 100))
         pt_score = min(100, int((avg_pt / 20.0) * 100))
         
-        # 3. Time of Day
+        # 4. Time of Day
         time_data = get_time_of_day_score()
         time_score = time_data['score']
         
-        # 4. Crowd Intelligence Score
+        # Dynamic Time Modifier: Depends on hour, activity, and incidents.
+        time_modifier = 0.0
+        if current_hour >= 21 or current_hour < 6:
+            time_modifier -= 5.0
+            if "Isolated" in road_activity_str:
+                time_modifier -= 3.0
+            if incident_penalty > 10.0:
+                time_modifier -= 4.0
+            if "Busy" in road_activity_str and incident_penalty < 5.0:
+                time_modifier = 0.0 
+        elif 6 <= current_hour < 12: 
+            time_modifier += 2.0
+        
+        # Calculate Final Continuous Safety Score (Traffic removed, replaced with Activity)
+        final_safety_score = base_score - incident_penalty + activity_modifier + time_modifier
+        final_safety_score = max(20.0, min(95.0, final_safety_score))
+        
+        route['safety_score_breakdown'] = {
+            "base_score": 95,
+            "incident_penalty": -int(round(incident_penalty)),
+            "activity_modifier": int(round(activity_modifier)),
+            "time_modifier": int(round(time_modifier)),
+            "final_safety_score": int(round(final_safety_score))
+        }
+        
+        community_risk = 100 - int(round(final_safety_score))
+        
+        if final_safety_score >= 80:
+            risk_category = "Safe"
+        elif final_safety_score >= 60:
+            risk_category = "Moderate Risk"
+        elif final_safety_score >= 40:
+            risk_category = "Elevated Risk"
+        else:
+            risk_category = "High Risk"
+        
         crowd_intel_score = (congestion_score * 0.60) + (community_risk * 0.15) + (comm_score * 0.10) + (pt_score * 0.10) + (time_score * 0.05)
         crowd_intel_score = int(round(crowd_intel_score))
         
         route['current_time'] = local_time_str
-        route['road_activity'] = get_road_activity(traffic_data['score'], current_hour)
+        route['road_activity'] = road_activity_str
         route['nearest_incidents'] = nearest_incidents
+        route['risk_category'] = risk_category
         
         route['community_reports'] = report_counts
         route['matched_incidents'] = matched_incidents
@@ -335,7 +412,14 @@ def analyze_routes_with_reports(routes, radius=500):
         route['visibility'] = get_visibility_score()
         route['crowd_intelligence_score'] = crowd_intel_score
         
-        route['ranking_score'] = route.get('duration_seconds', 0) + raw_risk_score + (congestion_score * 15)
+        time_score_penalty = route.get('duration_seconds', 0)
+        distance_score_penalty = route.get('distance_meters', 0) / 10.0
+        traffic_score_penalty = congestion_score * 10
+        
+        safety_drop = 95.0 - final_safety_score
+        safety_score_penalty = (safety_drop * 20) + (time_score_penalty * (safety_drop / 100.0))
+        
+        route['ranking_score'] = time_score_penalty + distance_score_penalty + traffic_score_penalty + safety_score_penalty
         
         analyzed_routes.append(route)
         
@@ -353,6 +437,6 @@ def analyze_routes_with_reports(routes, radius=500):
             if route['is_recommended']:
                 route['explanation'] = fallback_explanation(route)
             else:
-                route['explanation'] = "Alternative route."
+                route['explanation'] = fallback_explanation(route, analyzed_routes[0])
             
     return analyzed_routes
