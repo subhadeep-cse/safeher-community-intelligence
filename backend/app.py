@@ -541,6 +541,7 @@ def analyze_routes():
         start_coords = data.get('start_coords')
         end_coords = data.get('end_coords')
         mode = data.get('mode', 'walking')
+        radius = data.get('radius', 500)
         
         if not start_coords or not end_coords:
             return jsonify({"error": "Missing coordinates"}), 400
@@ -552,7 +553,7 @@ def analyze_routes():
         traffic_status = get_traffic_status(start_coords, end_coords)
         
         # 3. Analyze Community Reports Intersection
-        analyzed_routes = analyze_routes_with_reports(routes)
+        analyzed_routes = analyze_routes_with_reports(routes, radius=radius)
         
         # Inject traffic status into summary
         for r in analyzed_routes:

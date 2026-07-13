@@ -3,6 +3,8 @@ import MapComponent from '../components/MapComponent';
 import ReportCard from '../components/ReportCard';
 import SkeletonCard from '../components/SkeletonCard';
 import { ShieldAlert, CheckCircle, AlertTriangle, MapPin, Search, X } from 'lucide-react';
+import axios from 'axios';
+import { API_URL } from '../services/api';
 
 const FILTERS = ['All', 'Harassment', 'Theft', 'Broken Street Light', 'Medical Emergency', 'Accident', 'Suspicious Activity', 'Other'];
 
@@ -172,6 +174,48 @@ const Dashboard = ({ incidents, loading, error, onIncidentUpdated, mapCenter }) 
 
   const [alertData, setAlertData] = useState(null);
   const [showAlert, setShowAlert] = useState(false);
+
+  const [testRoutes, setTestRoutes] = useState([]);
+  const [isGeneratingRoutes, setIsGeneratingRoutes] = useState(false);
+
+  const handleGenerateTestRoutes = async (incident) => {
+    setIsGeneratingRoutes(true);
+    setTestRoutes([]);
+    try {
+      const lat = incident.latitude;
+      const lon = incident.longitude;
+      
+      const routePairs = [
+        // West <-> East
+        { start: [lat, lon - 0.022], end: [lat, lon + 0.022] },
+        // North <-> South
+        { start: [lat + 0.02, lon], end: [lat - 0.02, lon] },
+        // NorthWest <-> SouthEast
+        { start: [lat + 0.015, lon - 0.018], end: [lat - 0.015, lon + 0.018] },
+        // NorthEast <-> SouthWest
+        { start: [lat + 0.015, lon + 0.018], end: [lat - 0.015, lon - 0.018] }
+      ];
+
+      const promises = routePairs.map(pair => 
+        axios.post(`${API_URL}/api/intelligence/analyze-routes`, {
+          start_coords: pair.start,
+          end_coords: pair.end,
+          mode: 'driving-car'
+        })
+      );
+
+      const responses = await Promise.all(promises);
+      const allRoutes = responses.flatMap(res => res.data.routes || []);
+      
+      setTestRoutes(allRoutes);
+      setLocalMapCenter([lat, lon]);
+    } catch (err) {
+      console.error("Failed to generate test routes", err);
+      alert("Error generating test routes");
+    } finally {
+      setIsGeneratingRoutes(false);
+    }
+  };
 
   useEffect(() => {
     if (mapCenter) {
@@ -494,6 +538,7 @@ const Dashboard = ({ incidents, loading, error, onIncidentUpdated, mapCenter }) 
                 centerOn={localMapCenter} 
                 searchedLocation={searchedLocation}
                 searchRadius={searchRadius}
+                routes={testRoutes}
               />
             </>
           )}
@@ -520,7 +565,7 @@ const Dashboard = ({ incidents, loading, error, onIncidentUpdated, mapCenter }) 
                 <p>No reports found matching your criteria.</p>
               </div>
             ) : (
-              filteredIncidents.map(inc => <ReportCard key={inc.id} incident={inc} onUpdate={onIncidentUpdated} />)
+              filteredIncidents.map(inc => <ReportCard key={inc.id} incident={inc} onUpdate={onIncidentUpdated} onGenerateTestRoutes={handleGenerateTestRoutes} />)
             )}
           </div>
         </div>

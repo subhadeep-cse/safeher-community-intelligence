@@ -3,7 +3,7 @@ import { AlertCircle, MapPin, Clock, ShieldCheck, ThumbsUp, ThumbsDown, User } f
 import { verifyIncident } from '../services/api';
 import toast from 'react-hot-toast';
 
-const ReportCard = ({ incident, onUpdate }) => {
+const ReportCard = ({ incident, onUpdate, onGenerateTestRoutes }) => {
   const [isVerifying, setIsVerifying] = useState(false);
 
   const getSeverityColor = (sev) => {
@@ -144,6 +144,31 @@ const ReportCard = ({ incident, onUpdate }) => {
           {incident.status}
         </span>
       </div>
+
+      {import.meta.env.DEV && (
+        <div style={{ marginTop: '10px', paddingTop: '10px', borderTop: '1px dashed var(--border-glass)' }}>
+          <button 
+            onClick={() => onGenerateTestRoutes && onGenerateTestRoutes(incident)}
+            className="glass-panel"
+            style={{ 
+              width: '100%', 
+              padding: '8px', 
+              background: 'rgba(255, 255, 255, 0.1)', 
+              color: 'var(--text-primary)', 
+              border: '1px dashed rgba(255, 255, 255, 0.3)',
+              cursor: 'pointer',
+              fontSize: '12px',
+              fontWeight: 'bold',
+              display: 'flex',
+              justifyContent: 'center',
+              alignItems: 'center',
+              gap: '6px'
+            }}
+          >
+            [DEV] Generate Test Routes
+          </button>
+        </div>
+      )}
     </div>
   );
 };

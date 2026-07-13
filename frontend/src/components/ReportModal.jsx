@@ -2,7 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { X, MapPin, Camera, UserX, User, Search as SearchIcon, Map as MapIcon } from 'lucide-react';
 import { MapContainer, TileLayer, Marker, useMapEvents, useMap } from 'react-leaflet';
 import L from 'leaflet';
-import { reverseGeocode, searchLocation } from '../services/api';
+import { reverseGeocode } from '../services/api';
+import LocationAutocomplete from './LocationAutocomplete';
 
 const incidentTypes = ['Harassment', 'Theft', 'Broken Street Light', 'Medical Emergency', 'Accident', 'Suspicious Activity', 'Other'];
 const severities = ['Low', 'Medium', 'High', 'Critical'];
@@ -44,13 +45,9 @@ const ReportModal = ({ onClose, onSubmit, mode = 'community' }) => {
   });
   
   const [mapPos, setMapPos] = useState(null); 
-  const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState([]);
   const [loadingLocation, setLoadingLocation] = useState(false);
-  const [isSearching, setIsSearching] = useState(false);
   const [error, setError] = useState('');
   const [isGeocoding, setIsGeocoding] = useState(false);
-  const searchTimeoutRef = useRef(null);
 
   useEffect(() => {
     if (mapPos) {
@@ -65,24 +62,7 @@ const ReportModal = ({ onClose, onSubmit, mode = 'community' }) => {
     }
   }, [mapPos]);
 
-  // Debounced Intelligent Search
-  useEffect(() => {
-    if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
-    
-    if (searchQuery.length < 3) {
-      setSearchResults([]);
-      return;
-    }
 
-    searchTimeoutRef.current = setTimeout(async () => {
-      setIsSearching(true);
-      const results = await searchLocation(searchQuery);
-      setSearchResults(results);
-      setIsSearching(false);
-    }, 500); // 500ms debounce
-    
-    return () => clearTimeout(searchTimeoutRef.current);
-  }, [searchQuery]);
 
   const handleGPSLocation = () => {
     setLoadingLocation(true);
@@ -103,11 +83,7 @@ const ReportModal = ({ onClose, onSubmit, mode = 'community' }) => {
     }
   };
 
-  const handleSelectSearchResult = (res) => {
-    setMapPos([res.lat, res.lon]);
-    setSearchResults([]);
-    setSearchQuery(''); // clear query after selection so dropdown hides
-  };
+
 
   const handleImageUpload = (e) => {
     const file = e.target.files[0];
@@ -278,37 +254,10 @@ const ReportModal = ({ onClose, onSubmit, mode = 'community' }) => {
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '12px' }}>
           
           <div style={{ position: 'relative' }}>
-            <div className="glass-panel" style={{ display: 'flex', alignItems: 'center', padding: '10px 15px', borderRadius: '12px' }}>
-              <SearchIcon size={18} color="var(--color-primary)" style={{ marginRight: '10px' }} />
-              <input 
-                type="text" 
-                placeholder="Search Hospital, Landmark, Road..." 
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                style={{ background: 'transparent', border: 'none', color: 'var(--text-primary)', width: '100%', outline: 'none', fontSize: '15px' }}
-              />
-              {isSearching && <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>...</span>}
-            </div>
-            
-            {searchResults.length > 0 && (
-              <div className="glass-panel animate-fade-in" style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 1000, maxHeight: '250px', overflowY: 'auto', marginTop: '8px', background: 'var(--bg-main)', border: '1px solid var(--border-glass)' }}>
-                {searchResults.map((res, i) => (
-                  <div 
-                    key={i} 
-                    onClick={() => handleSelectSearchResult(res)}
-                    style={{ padding: '12px 15px', borderBottom: '1px solid var(--border-glass)', cursor: 'pointer', display: 'flex', alignItems: 'flex-start', gap: '10px' }}
-                  >
-                    <MapPin size={16} color="var(--color-primary)" style={{ marginTop: '3px' }} />
-                    <div>
-                      <div style={{ color: 'var(--text-primary)', fontWeight: 'bold', fontSize: '14px' }}>{res.name || 'Unknown Location'}</div>
-                      <div style={{ color: 'var(--text-secondary)', fontSize: '12px' }}>
-                        {[res.area, res.city].filter(Boolean).join(', ')}
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
+            <LocationAutocomplete 
+              placeholder="Search Hospital, Landmark, Road..." 
+              onSelect={(res) => setMapPos([res.lat, res.lon])}
+            />
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
