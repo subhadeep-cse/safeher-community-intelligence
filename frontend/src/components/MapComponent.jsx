@@ -138,6 +138,36 @@ const MapComponent = ({ incidents = [], centerOn, searchedLocation, searchRadius
           </Marker>
         )}
 
+        {showTraffic && routes.length > 0 && routes[0].path?.length > 0 && (
+          <>
+            <Marker 
+              position={routes[0].path[0]} 
+              icon={getMarkerIcon('green')}
+              zIndexOffset={3000}
+            >
+              <Popup>
+                <div style={{ color: '#333' }}>
+                  <h4 style={{ margin: '0 0 5px 0', color: '#28a745' }}>Source</h4>
+                  <p style={{ margin: '0', fontSize: '13px' }}>Route Starting Point</p>
+                </div>
+              </Popup>
+            </Marker>
+            
+            <Marker 
+              position={routes[0].path[routes[0].path.length - 1]} 
+              icon={getMarkerIcon('red')}
+              zIndexOffset={3000}
+            >
+              <Popup>
+                <div style={{ color: '#333' }}>
+                  <h4 style={{ margin: '0 0 5px 0', color: '#dc3545' }}>Destination</h4>
+                  <p style={{ margin: '0', fontSize: '13px' }}>Route Endpoint</p>
+                </div>
+              </Popup>
+            </Marker>
+          </>
+        )}
+
         {routes.map((route, index) => {
           const isSelected = index === selectedRouteIndex;
           const routeColor = getRouteColor ? getRouteColor(index) : '#007bff';
