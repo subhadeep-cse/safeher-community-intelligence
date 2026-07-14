@@ -145,30 +145,7 @@ const ReportCard = ({ incident, onUpdate, onGenerateTestRoutes }) => {
         </span>
       </div>
 
-      {import.meta.env.DEV && (
-        <div style={{ marginTop: '10px', paddingTop: '10px', borderTop: '1px dashed var(--border-glass)' }}>
-          <button 
-            onClick={() => onGenerateTestRoutes && onGenerateTestRoutes(incident)}
-            className="glass-panel"
-            style={{ 
-              width: '100%', 
-              padding: '8px', 
-              background: 'rgba(255, 255, 255, 0.1)', 
-              color: 'var(--text-primary)', 
-              border: '1px dashed rgba(255, 255, 255, 0.3)',
-              cursor: 'pointer',
-              fontSize: '12px',
-              fontWeight: 'bold',
-              display: 'flex',
-              justifyContent: 'center',
-              alignItems: 'center',
-              gap: '6px'
-            }}
-          >
-            [DEV] Generate Test Routes
-          </button>
-        </div>
-      )}
+
     </div>
   );
 };

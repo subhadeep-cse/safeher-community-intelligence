@@ -138,6 +138,7 @@ const CrowdIntelligence = ({ incidents }) => {
             selectedRouteIndex={selectedRouteIndex}
             setSelectedRouteIndex={setSelectedRouteIndex}
             getRouteColor={getRouteColor}
+            showTraffic={true}
           />
         </div>
 

@@ -44,7 +44,7 @@ const MapController = ({ centerPos }) => {
   return null;
 };
 
-const MapComponent = ({ incidents = [], centerOn, searchedLocation, searchRadius, activeVaultCase, routes = [], selectedRouteIndex = 0, setSelectedRouteIndex, getRouteColor }) => {
+const MapComponent = ({ incidents = [], centerOn, searchedLocation, searchRadius, activeVaultCase, routes = [], selectedRouteIndex = 0, setSelectedRouteIndex, getRouteColor, showLegend = !!getRouteColor, showTraffic = false }) => {
   const [selectedTrafficSegment, setSelectedTrafficSegment] = useState(null);
   
   const defaultCenter = centerOn || (incidents.length > 0 
@@ -169,7 +169,7 @@ const MapComponent = ({ incidents = [], centerOn, searchedLocation, searchRadius
               </Polyline>
               
               {/* Traffic Layer - rendered on top of base layer */}
-              {route.traffic_data?.segments?.map((seg, sIdx) => {
+              {showTraffic && route.traffic_data?.segments?.map((seg, sIdx) => {
                 const getTrafficColorHex = (c) => {
                   if (c === 'green') return '#28a745';
                   if (c === 'yellow') return '#ffc107';
@@ -242,44 +242,50 @@ const MapComponent = ({ incidents = [], centerOn, searchedLocation, searchRadius
       </MapContainer>
 
       {/* MAP LEGEND OVERLAY */}
-      <div style={{
-        position: 'absolute',
-        bottom: '20px',
-        right: '20px',
-        background: 'rgba(20, 20, 25, 0.9)',
-        padding: '15px',
-        borderRadius: '12px',
-        border: '1px solid rgba(255,255,255,0.1)',
-        zIndex: 1000,
-        fontSize: '11px',
-        color: '#fff',
-        boxShadow: '0 4px 6px rgba(0,0,0,0.3)',
-        pointerEvents: 'none',
-        backdropFilter: 'blur(10px)'
-      }}>
-        <div style={{ fontWeight: 'bold', marginBottom: '8px' }}>Routes</div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '10px' }}>
-          <div style={{display:'flex', alignItems:'center', gap:'5px'}}><span style={{width:'12px',height:'3px',background:'#007bff'}}></span> Route A</div>
-          <div style={{display:'flex', alignItems:'center', gap:'5px'}}><span style={{width:'12px',height:'3px',background:'#ff8c00'}}></span> Route B</div>
-          <div style={{display:'flex', alignItems:'center', gap:'5px'}}><span style={{width:'12px',height:'3px',background:'#8a2be2'}}></span> Route C</div>
+      {showLegend && (
+        <div style={{
+          position: 'absolute',
+          bottom: '20px',
+          right: '20px',
+          background: 'rgba(20, 20, 25, 0.9)',
+          padding: '15px',
+          borderRadius: '12px',
+          border: '1px solid rgba(255,255,255,0.1)',
+          zIndex: 1000,
+          fontSize: '11px',
+          color: '#fff',
+          boxShadow: '0 4px 6px rgba(0,0,0,0.3)',
+          pointerEvents: 'none',
+          backdropFilter: 'blur(10px)'
+        }}>
+          {showTraffic && (
+            <>
+              <div style={{ fontWeight: 'bold', marginBottom: '8px' }}>Routes</div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '10px' }}>
+                <div style={{display:'flex', alignItems:'center', gap:'5px'}}><span style={{width:'12px',height:'3px',background:'#007bff'}}></span> Route A</div>
+                <div style={{display:'flex', alignItems:'center', gap:'5px'}}><span style={{width:'12px',height:'3px',background:'#ff8c00'}}></span> Route B</div>
+                <div style={{display:'flex', alignItems:'center', gap:'5px'}}><span style={{width:'12px',height:'3px',background:'#8a2be2'}}></span> Route C</div>
+              </div>
+              
+              <div style={{ fontWeight: 'bold', marginBottom: '8px', borderTop: '1px solid rgba(255,255,255,0.2)', paddingTop: '8px' }}>Traffic</div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '10px' }}>
+                <div style={{display:'flex', alignItems:'center', gap:'5px'}}><span style={{width:'10px',height:'10px',background:'#28a745',borderRadius:'50%'}}></span> Free Flow</div>
+                <div style={{display:'flex', alignItems:'center', gap:'5px'}}><span style={{width:'10px',height:'10px',background:'#ffc107',borderRadius:'50%'}}></span> Moderate</div>
+                <div style={{display:'flex', alignItems:'center', gap:'5px'}}><span style={{width:'10px',height:'10px',background:'#fd7e14',borderRadius:'50%'}}></span> Heavy</div>
+                <div style={{display:'flex', alignItems:'center', gap:'5px'}}><span style={{width:'10px',height:'10px',background:'#dc3545',borderRadius:'50%'}}></span> Severe</div>
+              </div>
+            </>
+          )}
+          
+          <div style={{ fontWeight: 'bold', marginBottom: '8px', borderTop: showTraffic ? '1px solid rgba(255,255,255,0.2)' : 'none', paddingTop: showTraffic ? '8px' : '0' }}>Incidents</div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+            <div style={{color:'red'}}>Harassment</div>
+            <div style={{color:'orange'}}>Theft</div>
+            <div style={{color:'yellow'}}>Street Light</div>
+            <div style={{color:'violet'}}>Suspicious</div>
+          </div>
         </div>
-        
-        <div style={{ fontWeight: 'bold', marginBottom: '8px', borderTop: '1px solid rgba(255,255,255,0.2)', paddingTop: '8px' }}>Traffic</div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '10px' }}>
-          <div style={{display:'flex', alignItems:'center', gap:'5px'}}><span style={{width:'10px',height:'10px',background:'#28a745',borderRadius:'50%'}}></span> Free Flow</div>
-          <div style={{display:'flex', alignItems:'center', gap:'5px'}}><span style={{width:'10px',height:'10px',background:'#ffc107',borderRadius:'50%'}}></span> Moderate</div>
-          <div style={{display:'flex', alignItems:'center', gap:'5px'}}><span style={{width:'10px',height:'10px',background:'#fd7e14',borderRadius:'50%'}}></span> Heavy</div>
-          <div style={{display:'flex', alignItems:'center', gap:'5px'}}><span style={{width:'10px',height:'10px',background:'#dc3545',borderRadius:'50%'}}></span> Severe</div>
-        </div>
-        
-        <div style={{ fontWeight: 'bold', marginBottom: '8px', borderTop: '1px solid rgba(255,255,255,0.2)', paddingTop: '8px' }}>Incidents</div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-          <div style={{color:'red'}}>Harassment</div>
-          <div style={{color:'orange'}}>Theft</div>
-          <div style={{color:'yellow'}}>Street Light</div>
-          <div style={{color:'violet'}}>Suspicious</div>
-        </div>
-      </div>
+      )}
     </div>
   );
 };

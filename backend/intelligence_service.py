@@ -148,21 +148,21 @@ def generate_ai_explanation(analyzed_routes, radius):
         prompt = f"""
 You are the AI explanation engine for SafeHer's routing system. The routing engine has already selected Route {analyzed_routes[0]['id']} as the recommended route based on a deterministic scoring algorithm.
 Your ONLY job is to explain WHY the recommended route was chosen and WHY the alternative routes were rejected, in a natural, human-friendly way.
-Do NOT invent facts. Only use the structured data provided below.
+Do NOT invent facts. Only use the structured data provided below to perform a GENUINE COMPARISON between all available routes.
 
-CRITICAL INSTRUCTIONS:
-1. EXPLICITLY reference the following for every route using clear, separated sentences: Current local time, Traffic condition, Road activity (Busy/Moderate/Quiet/Isolated), Selected safety radius ({radius}m), Exact nearest incident distances, and Travel time/Distance differences compared to other routes.
-2. Radius Context: Instead of just stating the distance, explicitly state whether the incident is "inside the selected {radius}m safety radius" or "outside the selected {radius}m safety radius".
-3. Activity vs Traffic: Traffic speed and Road Activity are independent. State them both. E.g. "Traffic is Free Flow, but the road is Isolated."
-4. Route Comparison: Explain exactly why the recommended route won and why the alternative routes lost. Discuss which specific factors had the biggest influence (e.g. time of day vs. incident severity).
-5. Trade-offs: Explicitly include travel time and route distance when explaining why a route was selected or rejected, especially whenever they meaningfully differ between routes.
-6. Confidence: For each route explanation, append a double newline and then "Confidence: [Very High/High/Medium/Low] - [Short explanation of why]". 
+CRITICAL EXPLANATION RULES (STRICTLY FOLLOW THESE):
+1. Explain Trade-offs: The explanation must explain TRADE-OFFS. Do not simply repeat numbers. Compare the winning route against the alternatives across multiple factors (Safety, Traffic, Distance, Time). E.g. "Route A is recommended because it achieves the highest Safety Score (90/100). While Routes B and C offer slightly smoother traffic conditions, they also have lower safety scores. Therefore Route A provides the best overall balance."
+2. Higher Safety but Worse Traffic: If one route has higher safety but worse traffic, explain BOTH. E.g. "The increase in traffic on Route A is relatively small compared to the safety advantage, making it the best overall choice."
+3. Better Traffic but Longer: If one route has better traffic but is longer, explain BOTH. E.g. "Route C offers better traffic flow but requires an additional 7 minutes of travel and a longer distance. Since it provides no additional safety benefit, Route A remains the preferred route."
+4. Identical Safety Scores: If two or more routes have identical Safety Scores, NEVER say "Ranked lower due to Safety Score". Instead, explain the actual deciding factor (e.g. "Both routes provide the same safety level. Route A is recommended because it requires less travel time and a shorter travel distance.").
+5. Identical Traffic: If traffic is identical between routes, do NOT mention traffic as the deciding factor. Explain whichever factor actually determined the recommendation.
+6. Nearly Identical Routes: If every route is almost identical, say so. E.g. "All available routes provide similar levels of safety and traffic conditions. Route A is recommended because it offers the shortest overall journey while maintaining the same level of safety."
 7. Provide the output as a valid JSON object where keys are the EXACT Route IDs provided below (e.g. "{analyzed_routes[0]['id']}") and values are the full explanation strings. Do not include markdown formatting like ```json in the output.
 
 Example Output format:
 {{
-  "{analyzed_routes[0]['id']}": "Recommended because the nearest harassment incident is 1207 metres away. This lies outside the selected {radius} metre safety radius. Current time is 1:26 AM. Road activity is relatively quiet. No unsafe roads or dark roads were detected. Although late-night travel slightly reduces the Safety Score, this route still provides the best balance between safety and practicality.\\n\\nConfidence: Very High - Avoids all severe incidents within the safety radius.",
-  "tt_route_1": "Route was rejected because it passes within 180 metres of a reported harassment incident, which is inside the selected {radius} metre safety radius. This is heavily penalized at night, despite being 2 minutes faster.\\n\\nConfidence: High - Clear safety violation."
+  "{analyzed_routes[0]['id']}": "Route A is recommended because it achieves the highest Safety Score (90/100). While the alternative routes offer slightly smoother traffic conditions, they also have lower safety scores and therefore expose the traveller to greater overall risk. The increase in traffic on this route is relatively small compared to the safety advantage, making it the best overall choice.",
+  "tt_route_1": "Although this route offers better traffic flow and a slightly faster driving experience, its Safety Score is lower than the recommended route due to higher overall risk factors. Since the improvement in traffic is not significant enough to justify the reduction in safety, it is ranked below the recommended route."
 }}
 
 Structured Data:
@@ -198,23 +198,65 @@ Route {r['id']} (Recommended: {r['is_recommended']}):
         print(f"Gemini AI failed: {e}")
         return explanations
 
-def fallback_explanation(route_data, recommended_route=None):
-    score = route_data.get('safety_score_breakdown', {}).get('final_safety_score', 0)
-    harassment = route_data.get('nearest_incidents', {}).get('Harassment', 'Unknown')
-    time_str = route_data.get('current_time', 'Unknown')
-    activity = route_data.get('road_activity', 'Unknown')
-    traffic = route_data.get('traffic_data', {}).get('status', 'Unknown')
+def fallback_explanation(route_data, all_routes):
+    is_rec = route_data['is_recommended']
+    rec_route = all_routes[0]
     
-    if recommended_route is None:
-        return f"Recommended Route: Current time is {time_str}. Road activity is {activity}. Traffic is {traffic}. Nearest harassment is {harassment}m away. With a Safety Score of {score}/100, this route provides the best available balance of safety and practicality."
+    score = route_data.get('safety_score_breakdown', {}).get('final_safety_score', 0)
+    rec_score = rec_route.get('safety_score_breakdown', {}).get('final_safety_score', 0)
+    
+    traffic_score = route_data.get('traffic_data', {}).get('score', 0)
+    rec_traffic_score = rec_route.get('traffic_data', {}).get('score', 0)
+    
+    time_mins = math.ceil(route_data.get('duration_seconds', 0) / 60)
+    rec_time_mins = math.ceil(rec_route.get('duration_seconds', 0) / 60)
+    time_diff = time_mins - rec_time_mins
+    
+    dist = route_data.get('distance_meters', 0)
+    rec_dist = rec_route.get('distance_meters', 0)
+    dist_diff = dist - rec_dist
+
+    all_scores = [r.get('safety_score_breakdown', {}).get('final_safety_score', 0) for r in all_routes]
+    all_same_safety = len(set(all_scores)) == 1 and len(all_routes) > 1
+    max_score = max(all_scores)
+
+    if is_rec:
+        if len(all_routes) == 1:
+            return "This is the only available route for your destination."
+            
+        if all_same_safety:
+            return "All available routes provide similar levels of safety. This route is recommended because it offers the most efficient journey, requiring the shortest overall travel distance and time."
+        
+        alts_better_traffic = any(r.get('traffic_data', {}).get('score', 0) > traffic_score for r in all_routes if not r['is_recommended'])
+        
+        if score == max_score:
+            if alts_better_traffic:
+                return f"This route is recommended because it provides the highest Safety Score ({score}/100). While alternative routes may offer slightly lighter traffic conditions, the reduction in travel congestion does not compensate for their lower safety scores. Therefore, this route provides the best overall balance."
+            else:
+                return f"This route is recommended because it provides the highest Safety Score ({score}/100) along with optimal traffic conditions, making it the safest and most efficient choice."
+        else:
+            return f"This route is recommended because it provides an excellent balance. While another route has a marginally higher Safety Score, it requires significantly more travel time. This route ({score}/100) offers the best combination of safety and practicality."
+            
     else:
-        time_diff = math.ceil(route_data.get('duration_seconds', 0) / 60) - math.ceil(recommended_route.get('duration_seconds', 0) / 60)
-        dist_diff = route_data.get('distance_meters', 0) - recommended_route.get('distance_meters', 0)
+        if score < rec_score:
+            if traffic_score > rec_traffic_score:
+                return f"Although this route offers better traffic flow, its Safety Score ({score}/100) is lower than the recommended route due to higher overall risk factors. The improvement in traffic is not significant enough to justify the reduction in safety."
+            else:
+                return f"This route is ranked lower because it has a lower Safety Score ({score}/100) and offers no improvement in traffic or travel efficiency compared to the recommended route."
         
-        t_str = f"{abs(time_diff)} mins {'faster' if time_diff < 0 else 'slower'}" if time_diff != 0 else "same travel time"
-        d_str = f"{abs(dist_diff)}m {'shorter' if dist_diff < 0 else 'longer'}" if dist_diff != 0 else "same distance"
-        
-        return f"Alternative Route: Ranked lower due to a Safety Score of {score}/100. Nearest harassment is {harassment}m away. Traffic is {traffic}. It is {t_str} and {d_str} than the recommended route, but does not offer a better overall balance of safety and practicality."
+        elif score == rec_score:
+            if traffic_score > rec_traffic_score:
+                return f"This route offers better traffic flow but requires an additional {time_diff} minutes of travel and a longer distance. Since it provides no additional safety benefit over the recommended route, it is not preferred."
+            else:
+                if dist_diff > 0:
+                    return f"This route provides the same safety level as the recommended route but is {dist_diff} metres longer without offering any measurable improvement in traffic. Therefore it is ranked lower."
+                elif time_diff > 0:
+                    return f"This route provides the same safety level as the recommended route but takes {time_diff} minutes longer. Therefore it is ranked lower."
+                else:
+                    return "This route is nearly identical to the recommended route in safety and traffic, but was ranked slightly lower in internal efficiency calculations."
+                    
+        else:
+            return f"Although this route offers a slightly higher Safety Score ({score}/100), it requires an additional {time_diff} minutes and {dist_diff} metres of travel. The marginal safety benefit does not justify the significant drop in travel efficiency, so it is ranked below the recommended route."
 
 def analyze_routes_with_reports(routes, radius=500):
     try:
@@ -434,9 +476,6 @@ def analyze_routes_with_reports(routes, radius=500):
         if route['id'] in gemini_explanations:
             route['explanation'] = gemini_explanations[route['id']]
         else:
-            if route['is_recommended']:
-                route['explanation'] = fallback_explanation(route)
-            else:
-                route['explanation'] = fallback_explanation(route, analyzed_routes[0])
+            route['explanation'] = fallback_explanation(route, analyzed_routes)
             
     return analyzed_routes
